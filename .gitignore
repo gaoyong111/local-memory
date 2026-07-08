@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+*.egg-info/
+dist/
+build/
+
+# IDE
+.idea/
+.vscode/
+*.swp
+
+# Local env & real config (never commit secrets / live pool config)
+.env
+.env.*
+!.env.example
+*.local.json
+config.json
+config_local.json
+config_ollama.json
+config_api.json
+
+# OS
+.DS_Store
+
+# Test / temp
+.pytest_cache/
+.coverage
+htmlcov/
+
+# One-off local batch scripts (memory IDs, machine paths)
+scripts/english_grooming_run.py
+scripts/review_helpers.local.json

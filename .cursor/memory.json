@@ -1,0 +1,14 @@
+{
+  "_schema": "workspace-v1",
+  "_comment": "仓库级示例：clone 后按你的 project 名修改 access.read / access.write",
+  "pool": "default",
+  "access": {
+    "read": ["local-memory", ""],
+    "write": ["local-memory"]
+  },
+  "detect": {
+    "aliases": {
+      "local-memory": "local-memory"
+    }
+  }
+}

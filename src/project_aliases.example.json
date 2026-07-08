@@ -1,0 +1,5 @@
+{
+    "_comment": "复制到池目录 project_aliases.json（如 ~/.memory/pools/default/）并填入目录名映射。勿提交真实项目名。",
+    "my-repo-dir-name": "my-mem0-project-id",
+    "another-workspace-folder": "another-project-id"
+}

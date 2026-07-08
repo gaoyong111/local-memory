@@ -1,0 +1,20 @@
+{
+  "embedder": {
+    "provider": "ollama",
+    "model": "bge-m3",
+    "base_url": "http://localhost:11434"
+  },
+  "llm": {
+    "provider": "openai_compatible",
+    "model": "glm-5.1",
+    "base_url": "https://your-api.example/v1",
+    "api_key_env": "NEWAPI_KEY",
+    "temperature": 0.1,
+    "max_tokens": 2000
+  },
+  "fallback_llm": {
+    "provider": "ollama",
+    "model": "qwen2.5:7b",
+    "base_url": "http://localhost:11434"
+  }
+}
