@@ -128,4 +128,7 @@ python3 ~/.memory/runtime/search_context.py '测试'
 是，共用 `~/.memory/pools/default/`（或 registry 当前 active pool）。
 
 **从 mem0-local 升级？**  
-见 [v2-migration.md](v2-migration.md)，验证通过后删除旧 MCP 条目。
+见 [v2-migration.md](v2-migration.md)，验证通过后删除旧 MCP 条目。迁移完成见文档「[迁移后清理](v2-migration.md#迁移后清理可选)」。
+
+**环境变量？**  
+仅需 `MEMORY_DIR` + `PYTHONPATH`。勿设 `MEM0_*`（**v2.0.1** 起 runtime 不读取；GitHub Release 请用 ≥ v2.0.1 或 main 上 `64ff574` 之后）。

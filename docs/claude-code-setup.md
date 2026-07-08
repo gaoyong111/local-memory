@@ -143,8 +143,8 @@ python3 ~/.memory/runtime/search_context.py '测试'
 **MCP 启动失败？**  
 Ollama 未运行或池路径错误。确认 `MEMORY_DIR` 与 registry 一致。迁移后去掉 `MEMORY_CHROMA_COLLECTION=mem0`。
 
-**还要设 `MEM0_DIR` 吗？**  
-不需要。仅用 `MEMORY_DIR` + `PYTHONPATH`。`~/.mem0` symlink 仅供旧脚本兼容。
+**环境变量？**  
+仅需 `MEMORY_DIR` + `PYTHONPATH`。勿设 `MEM0_*`（**v2.0.1** 起 runtime 不读取；GitHub Release 请用 ≥ v2.0.1 或 main 上 `64ff574` 之后）。
 
 **写入时中文变英文？**  
 v2 原样入库，无 infer 改写。

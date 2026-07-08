@@ -159,7 +159,7 @@ def migrate(pool: Path, *, dry_run: bool = False) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description='迁移 history.db → memory_events')
-    parser.add_argument('--pool', required=True, help='池目录，如 ~/.mem0 或 ~/.memory/pools/default')
+    parser.add_argument('--pool', required=True, help='池目录，如 ~/.memory/pools/default')
     parser.add_argument('--dry-run', action='store_true')
     args = parser.parse_args()
     pool = Path(args.pool).expanduser().resolve()

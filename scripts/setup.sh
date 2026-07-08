@@ -10,7 +10,7 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MEMORY_DIR="${MEMORY_DIR:-$HOME/.memory}"
 RUNTIME_DIR="${MEMORY_RUNTIME:-$MEMORY_DIR/runtime}"
 POOL_DIR="${MEMORY_POOL_DIR:-$MEMORY_DIR/pools/default}"
-# 过渡期：若 ~/.mem0 已有数据，默认池指向它
+# 首次部署：若 ~/.mem0 仍有未迁移数据且未设 MEMORY_POOL_DIR，默认池指向它（仅 setup 用，runtime 不读 MEM0_*）
 if [ -z "$MEMORY_POOL_DIR" ] && [ -f "$HOME/.mem0/active_memories.db" ]; then
     POOL_DIR="$HOME/.mem0"
 fi

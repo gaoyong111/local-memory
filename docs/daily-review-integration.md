@@ -44,7 +44,7 @@
 | MCP `run_episodic_grooming` | 复盘后批处理 episodic |
 | 快照 diff | 对比复盘前后记忆状态 |
 
-池路径：`~/.memory/pools/<active>/`（`~/.mem0` symlink 等价）。
+池路径：`~/.memory/pools/<active>/`。
 
 ---
 

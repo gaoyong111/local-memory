@@ -251,7 +251,13 @@ LLM provider 支持：`ollama`、`openai_compatible`、`anthropic`。
 | `PYTHONPATH` | 运行时代码路径 | `~/.memory/runtime` |
 | `MEMORY_POOL` | 覆盖 active pool | registry |
 | `MEMORY_CHROMA_COLLECTION` | 覆盖 collection 名 | pool.meta |
-| `MEM0_DIR` | 旧版兼容 | 已废弃；仅 symlink |
+| `MEMORY_USER_ID` | 用户 ID | `default-user` |
+| `MEMORY_KW_REL_RATIO` | keyword 相对截断比例 | `0.25` |
+| `MEMORY_VECTOR_REL_MARGIN` | 向量相对阈值 | `0.10` |
+| `MEMORY_FALLBACK_CONFIG` | 无 `fallback_llm` 时的兜底配置文件 | 无 |
+| `MEMORY_PROJECT_ALIASES` | project 别名 JSON 路径 | pool 内 `project_aliases.json` |
+
+> **Breaking（v2.0.1）**：运行时代码**不再读取** `MEM0_*` 环境变量（commit `64ff574`）。迁移完成后 pool `.env` 与 IDE 配置仅保留 `MEMORY_*`。GitHub Release **v2.0.0** 仍含旧别名；请使用 **≥ v2.0.1** 或 main 最新代码。
 
 新环境只需 `MEMORY_DIR` + `PYTHONPATH`。
 

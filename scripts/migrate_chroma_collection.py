@@ -21,10 +21,9 @@ def migrate(
     target: str = 'memories',
     dry_run: bool = False,
 ) -> dict:
-    os.environ['MEM0_DIR'] = str(pool)
+    os.environ['MEMORY_DIR'] = str(Path.home() / '.memory')
     os.environ['MEMORY_CHROMA_PATH'] = str(pool / 'chroma_db')
     os.environ.pop('MEMORY_CHROMA_COLLECTION', None)
-    os.environ.setdefault('MEMORY_DIR', str(Path.home() / '.memory'))
 
     chroma_path = pool / 'chroma_db'
     if not chroma_path.is_dir():

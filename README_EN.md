@@ -116,6 +116,7 @@ Details → [docs/architecture.md](docs/architecture.md) · [docs/v2-design.md](
 
 | Document | Contents |
 |----------|----------|
+| [CHANGELOG.md](CHANGELOG.md) | Releases and breaking changes |
 | [architecture.md](docs/architecture.md) | Write policies, hybrid search, storage model |
 | [v2-design.md](docs/v2-design.md) | Concept model, module map, design decisions |
 | [workspace-binding.md](docs/workspace-binding.md) | Per-repo read/write permissions |
@@ -180,6 +181,8 @@ bash scripts/migrate_full_to_v2.sh
 ```
 
 See [docs/v2-migration.md](docs/v2-migration.md) for rollback and manual steps. New installs can skip this entirely.
+
+> **v2.0.1 breaking**: From this release, runtime **no longer reads** `MEM0_*` env vars. After data migration, follow [post-migration cleanup](docs/v2-migration.md#迁移后清理可选) (remove `MEM0_*` from pool `.env`, drop `~/.mem0` symlink, prune orphan Chroma collections). GitHub **v2.0.0** still accepts legacy env names; use **≥ v2.0.1** or main after commit `64ff574`.
 
 ---
 

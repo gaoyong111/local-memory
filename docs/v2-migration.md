@@ -62,7 +62,7 @@ bash scripts/migrate_full_to_v2.sh
    }
    ```
 
-   去掉 `MEMORY_CHROMA_COLLECTION=mem0` 和 `MEM0_DIR`（如有）。
+   去掉 `MEMORY_CHROMA_COLLECTION=mem0` 及一切 `MEM0_*` env（**v2.0.1** 起 runtime 不再读取）。
 
 2. **拉取新代码后重新部署 runtime**（迁移脚本已跑过 setup 则仅在更新代码后需要）：
 
@@ -122,10 +122,19 @@ rm -rf ~/.memory/pools/default          # 仅当要丢弃已迁移副本时
 
 ---
 
-## 过渡期
+## 迁移后清理（可选）
 
-- `~/.mem0` symlink 指向 v2 默认池 —— 仍读该路径的旧脚本可用
-- `MEM0_DIR` 已废弃，改用 `MEMORY_DIR`
+**v2.0.1** 运行时代码仅认 `MEMORY_*`，不再读 `MEM0_*` 或 `~/.mem0` 路径：
+
+1. pool `.env` 去掉 `MEM0_DIR`、`MEM0_FALLBACK_CONFIG`、`MEM0_CONFIG`
+2. 删除 `~/.mem0` symlink（若曾创建）
+3. Chroma 孤儿 collection（`mem0_entities`、`mem0migrations`）可在确认 `memories` 完整后删除
+4. v1 配置文件移至 `pools/default/legacy/` 或删除
+
+---
+
+## 过渡期（仅迁移脚本语境）
+
+`migrate_full_to_v2.sh` 仍可能创建 `~/.mem0` → pool 的 symlink，便于迁移窗口内旧脚本读数据。**部署 v2.0.1 runtime 后**，IDE / cron / skill 应全部改用 `MEMORY_DIR=~/.memory`，symlink 可移除。
+
 - `pending/`、`sync_pending/` 随池目录迁移
-
-稳定运行且所有脚本改用 `MEMORY_DIR` 后，可移除 symlink。

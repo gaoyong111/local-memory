@@ -116,6 +116,7 @@ python3 ~/.memory/runtime/search_context.py '测试'
 
 | 文档 | 内容 |
 |------|------|
+| [CHANGELOG.md](CHANGELOG.md) | 版本与 breaking 变更 |
 | [architecture.md](docs/architecture.md) | 写入策略、混合检索、存储模型 |
 | [v2-design.md](docs/v2-design.md) | 概念模型、模块职责、设计决策 |
 | [workspace-binding.md](docs/workspace-binding.md) | 仓库级读写权限 |
@@ -180,6 +181,8 @@ bash scripts/migrate_full_to_v2.sh
 ```
 
 回滚与分步说明见 [docs/v2-migration.md](docs/v2-migration.md)。全新安装可跳过。
+
+> **v2.0.1 breaking**：自该版本起 runtime **不再读取** `MEM0_*` env。若已完成 v1→v2 数据迁移，请继续执行文档中的「[迁移后清理](docs/v2-migration.md#迁移后清理可选)」（去掉 pool `.env` 中 `MEM0_*`、删除 `~/.mem0` symlink、清理 Chroma 孤儿 collection 等）。GitHub **v2.0.0** Release 仍兼容旧 env 名；请升级到 **≥ v2.0.1** 或使用 main 上 `64ff574` 之后的代码。
 
 ---
 

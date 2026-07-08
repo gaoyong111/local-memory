@@ -16,7 +16,7 @@ _RUNTIME_DIR = os.path.dirname(os.path.abspath(__file__))
 if _RUNTIME_DIR not in sys.path:
     sys.path.insert(0, _RUNTIME_DIR)
 
-from memory_paths import ACTIVE_DB, HISTORY_DB, resolve_config_path
+from memory_paths import ACTIVE_DB, HISTORY_DB
 from hybrid_search import (
     detect_project,
     extract_keywords,
@@ -341,16 +341,6 @@ def compute_edges(memories: list[dict]) -> list[dict]:
         })
 
     return edges
-
-
-def _load_pool_config() -> dict:
-    """读取 pool config.json（与 llm_client / MCP 对齐）。"""
-    config_path = resolve_config_path()
-    try:
-        with open(config_path, encoding='utf-8') as handle:
-            return json.load(handle)
-    except OSError:
-        return {}
 
 
 def _get_chroma_collection():
