@@ -183,6 +183,22 @@ See [docs/v2-migration.md](docs/v2-migration.md) for rollback and manual steps. 
 
 ---
 
+## Troubleshooting
+
+### Chroma multi-process / grooming returns nothing
+
+Chroma uses a local SQLite lock. If **MCP is already running**, launching `scripts/episodic_grooming_run.py` separately may return zero suggestions or fail while competing for the client.
+
+**Prefer:** call MCP tool `run_episodic_grooming` while MCP is up; use the CLI script only when MCP is stopped. See [architecture.md](docs/architecture.md) and [daily-review-integration.md](docs/daily-review-integration.md).
+
+### Hook / MCP still behaves like an old build
+
+Runtime code lives under `~/.memory/runtime/`. After editing `src/` or `configs/`, rerun `bash scripts/setup.sh`, then Reload Window or restart MCP.
+
+Hook injection uses header `[local-memory 自动注入的相关记忆]` with lines `- #N [scope] (source) text` (`format_results_lines`). `search_context.py` uses `[local-memory 相关记忆]`. MCP `search_memory` uses `format_mcp_search_output` (id / kw / vec / rrf scores, no injection header).
+
+---
+
 ## Data layout
 
 ```text

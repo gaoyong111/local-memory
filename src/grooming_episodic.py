@@ -18,13 +18,13 @@ from add_policy import DEFAULT_CATEGORY, VALID_CATEGORIES, normalize_category
 
 logger = logging.getLogger(__name__)
 
-GROOMING_ADVISOR_SYSTEM = """你是 mem0 episodic 记忆梳理顾问。只输出 JSON，不自动执行任何操作。
+GROOMING_ADVISOR_SYSTEM = """你是 local-memory episodic 记忆梳理顾问。只输出 JSON，不自动执行任何操作。
 
 category 含义：
 - episodic：踩坑、决策、一次性事件
 - reference：稳定技术事实/约定
 - workflow：可复用流程/方法论
-- behavior：行为规则（优先放 CLAUDE.md，mem0 中谨慎升 behavior）
+- behavior：行为规则（优先放 CLAUDE.md，local-memory 中谨慎升 behavior）
 - preference：用户偏好
 
 判断标准：
@@ -213,7 +213,7 @@ def _rule_based_decision(
                 target_category='workflow',
                 reason='含 Why/How 且偏流程方法论，建议升 workflow',
             )
-        if any(word in text for word in ('api', 'bug', 'provider', 'chroma', 'mem0')):
+        if any(word in text for word in ('api', 'bug', 'provider', 'chroma', 'mem0', 'local-memory')):
             return GroomingDecision(
                 action='promote',
                 target_category='reference',

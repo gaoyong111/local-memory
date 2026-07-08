@@ -134,7 +134,7 @@ export MEMORY_DIR=~/.memory PYTHONPATH=~/.memory/runtime
 python3 ~/.memory/runtime/search_context.py '测试'
 ```
 
-确认 MCP 工具可调用（**9 个**，含 `run_episodic_grooming`），发消息时有记忆注入；Hook 上下文含 `[local-memory 自动注入的相关记忆]`。
+确认 MCP 工具可调用（**9 个**，含 `run_episodic_grooming`），发消息时有记忆注入；Hook 上下文含 `[local-memory 自动注入的相关记忆]`（CLI 搜索为 `[local-memory 相关记忆]`）。
 
 ---
 

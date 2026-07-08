@@ -53,13 +53,16 @@ LANG_VECTOR_OVERSAMPLE = 4
 # 设 0 或环境变量 MEM0_VECTOR_REL_MARGIN=0 可关闭
 VECTOR_SCORE_REL_MARGIN = float(os.getenv('MEM0_VECTOR_REL_MARGIN', '0.10'))
 
+RESULTS_HEADER = '[local-memory 相关记忆]'
+HOOK_RESULTS_HEADER = '[local-memory 自动注入的相关记忆]'
+
 GENERIC_DIR_NAMES = frozenset({
     'Desktop', 'Documents', 'Home', 'home', 'Downloads', 'src', 'code', 'projects', 'tmp',
 })
 
 
 def _load_project_aliases() -> dict[str, str]:
-    """从 ~/.mem0/project_aliases.json 加载目录名 -> project 映射（不硬编码在源码）。"""
+    """从池目录 project_aliases.json 加载目录名 -> project 映射（不硬编码在源码）。"""
     path = os.getenv('MEM0_PROJECT_ALIASES') or os.getenv('MEMORY_PROJECT_ALIASES') or str(PROJECT_ALIASES_PATH)
     if not os.path.isfile(path):
         return {}
@@ -675,7 +678,7 @@ def hybrid_search(
 
 def format_results_lines(
     results: list[dict[str, Any]],
-    header: str = '[local-memory 相关记忆]',
+    header: str = RESULTS_HEADER,
 ) -> str:
     """格式化为可注入上下文的文本。"""
     if not results:

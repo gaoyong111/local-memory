@@ -7,10 +7,11 @@ import sys
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
-from pool_manager import get_active_pool_id, list_pools, switch_pool  # noqa: E402
+from pool_manager import get_active_pool_id, init_pool_directory, list_pools, switch_pool  # noqa: E402
 
 
 class PoolManagerTests(unittest.TestCase):
@@ -52,6 +53,31 @@ class PoolManagerTests(unittest.TestCase):
             switched = switch_pool('other', root)
             self.assertEqual(switched.pool_id, 'other')
             self.assertEqual(get_active_pool_id(root), 'other')
+
+    def test_init_pool_seeds_config_and_aliases_from_runtime(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            runtime = root / 'runtime'
+            runtime.mkdir()
+            (runtime / 'config_ollama.example.json').write_text(
+                '{"embedder":{"provider":"ollama"}}',
+                encoding='utf-8',
+            )
+            (runtime / 'project_aliases.example.json').write_text(
+                '{"demo-dir": "demo-project"}',
+                encoding='utf-8',
+            )
+            pool_path = root / 'pools' / 'lab'
+
+            with mock.patch('pool_manager.resolve_runtime_dir', return_value=runtime):
+                init_pool_directory(pool_path, 'lab')
+
+            self.assertTrue((pool_path / 'config.json').is_file())
+            self.assertTrue((pool_path / 'project_aliases.json').is_file())
+            self.assertEqual(
+                json.loads((pool_path / 'project_aliases.json').read_text(encoding='utf-8')),
+                {'demo-dir': 'demo-project'},
+            )
 
 
 if __name__ == '__main__':

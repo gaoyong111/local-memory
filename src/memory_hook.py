@@ -9,6 +9,7 @@ import os
 import sys
 
 from hybrid_search import (
+    HOOK_RESULTS_HEADER,
     detect_project,
     format_results_lines,
     hybrid_search,
@@ -100,8 +101,7 @@ def main() -> None:
         print('{}' if hook_format == 'cursor' else json.dumps({}))
         return
 
-    header = '[local-memory 自动注入的相关记忆]'
-    context = format_results_lines(results, header=header)
+    context = format_results_lines(results, header=HOOK_RESULTS_HEADER)
 
     if hook_format == 'cursor':
         output_cursor(context)

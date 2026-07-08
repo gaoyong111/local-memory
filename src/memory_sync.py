@@ -527,7 +527,7 @@ def sync_active_insert(
     category: str = '',
     lang: str = 'zh',
 ) -> SyncResult:
-    """mem0 add 成功后写入 active 查询库（history/Chroma 已由 mem0 写入）。"""
+    """写入 active 查询库；由 memory_store.add 在 Chroma upsert 之后调用。"""
     memory_id = (memory_id or '').strip()
     content = (content or '').strip()
     if not memory_id or not content:

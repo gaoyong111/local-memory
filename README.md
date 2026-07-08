@@ -183,6 +183,22 @@ bash scripts/migrate_full_to_v2.sh
 
 ---
 
+## 故障排查
+
+### Chroma 多进程 / grooming 无结果
+
+Chroma 使用本地 SQLite 锁；**MCP 已运行时**，再单独跑 `scripts/episodic_grooming_run.py` 可能因争抢客户端而返回 0 条建议或报错。
+
+**推荐：** MCP 在线时用工具 `run_episodic_grooming`；MCP 未启动时再跑 CLI 脚本。详见 [architecture.md](docs/architecture.md) · [daily-review-integration.md](docs/daily-review-integration.md)。
+
+### 修改代码后 Hook / MCP 仍像旧版
+
+`setup.sh` 部署到 `~/.memory/runtime/`，改 `src/` 或 `configs/` 后须重新执行 `bash scripts/setup.sh`，并 Reload Window 或重启 MCP。
+
+Hook 注入头为 `[local-memory 自动注入的相关记忆]`，条目为 `- #N [scope] (source) 正文`（`format_results_lines`）。`search_context.py` 调试输出用 `[local-memory 相关记忆]`。MCP `search_memory` 走 `format_mcp_search_output`（含 id / kw / vec / rrf 分数，无注入头）。
+
+---
+
 ## 数据目录
 
 ```text

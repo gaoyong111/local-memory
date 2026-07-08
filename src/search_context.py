@@ -16,7 +16,7 @@ def main() -> None:
     if not results:
         return
 
-    print(format_results_lines(results, header='[local-memory搜索结果]'))
+    print(format_results_lines(results))
 
 
 if __name__ == '__main__':

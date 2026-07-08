@@ -63,7 +63,7 @@
 
 Ollama 较慢时可将 `timeout` 调到 30。
 
-Hook 成功时上下文含 `[local-memory 自动注入的相关记忆]` 标记。
+Hook 成功时上下文含 `[local-memory 自动注入的相关记忆]` 标记（CLI `search_context.py` 为 `[local-memory 相关记忆]`）。
 
 ---
 

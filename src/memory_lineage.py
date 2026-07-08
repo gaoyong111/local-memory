@@ -1,4 +1,4 @@
-"""mem0 记忆演变留痕：追加式 lineage 日志 + history.db 时间线合并查询。"""
+"""记忆演变留痕：追加式 lineage 日志 + history.db 时间线合并查询。"""
 
 from __future__ import annotations
 
