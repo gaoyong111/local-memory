@@ -10,10 +10,6 @@ REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
 MEMORY_DIR="${MEMORY_DIR:-$HOME/.memory}"
 RUNTIME_DIR="${MEMORY_RUNTIME:-$MEMORY_DIR/runtime}"
 POOL_DIR="${MEMORY_POOL_DIR:-$MEMORY_DIR/pools/default}"
-# 首次部署：若 ~/.mem0 仍有未迁移数据且未设 MEMORY_POOL_DIR，默认池指向它（仅 setup 用，runtime 不读 MEM0_*）
-if [ -z "$MEMORY_POOL_DIR" ] && [ -f "$HOME/.mem0/active_memories.db" ]; then
-    POOL_DIR="$HOME/.mem0"
-fi
 SKILL_SCRIPTS="$HOME/.claude/skills/daily-review/scripts"
 
 echo "=== local-memory 部署 ==="
@@ -60,7 +56,7 @@ else
     echo "[3/5] 跳过 review_helpers（需 INSTALL_DAILY_REVIEW_HELPERS=1 启用）"
 fi
 
-# 4. greenfield / 迁移后池结构（不覆盖已有数据；不盲目覆盖 registry）
+# 4. 默认池结构（不覆盖已有数据；不盲目覆盖 registry）
 if [ ! -f "$MEMORY_DIR/registry.json" ]; then
     cat > "$MEMORY_DIR/registry.json" << EOF
 {
@@ -75,7 +71,7 @@ if [ ! -f "$MEMORY_DIR/registry.json" ]; then
 EOF
     echo "[4/5] registry.json 已创建"
 else
-    echo "[4/5] registry.json 已存在，跳过（避免覆盖 migrate_full_to_v2.sh 结果）"
+    echo "[4/5] registry.json 已存在，跳过（避免覆盖已有 registry）"
 fi
 
 if [ ! -f "$POOL_DIR/pool.meta.json" ]; then
@@ -114,10 +110,10 @@ echo "[5/5] 请确保已安装: pip install -r $REPO_ROOT/requirements.txt"
 echo ""
 echo "=== 部署完成 ==="
 echo ""
-echo "标准 v2 布局（迁移后）："
+echo "标准 v2 布局："
 echo "  export MEMORY_DIR=$MEMORY_DIR"
 echo "  export PYTHONPATH=$RUNTIME_DIR"
-echo "  # collection 读 pool.meta.json（通常 memories），勿设 MEMORY_CHROMA_COLLECTION=mem0"
+echo "  # collection 读 pool.meta.json（默认 memories）"
 echo ""
 echo "MCP 配置示例 (~/.cursor/mcp.json)："
 echo "  \"local-memory\": {"

@@ -317,8 +317,6 @@ def snapshot_path(date_str: str | None = None) -> str:
 
 def find_latest_snapshot() -> str | None:
     paths = sorted(glob.glob(os.path.join(DATA_DIR, 'memory-snapshot-*.json')))
-    if not paths:
-        paths = sorted(glob.glob(os.path.join(DATA_DIR, 'mem0-snapshot-*.json')))
     return paths[-1] if paths else None
 
 

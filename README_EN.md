@@ -2,7 +2,7 @@
 
 **Local-first persistent memory for AI coding assistants — Chinese-friendly, verbatim storage.**
 
-Store facts, preferences, and workflow knowledge on your machine. Optimized for **Chinese memories**: verbatim ingest (no LLM rewrite on write), hybrid search with Chinese-aware keyword tokenization + bge-m3 vectors + RRF fusion. Inject context via IDE hooks or query on demand through MCP. No cloud dependency, no mem0 library.
+Store facts, preferences, and workflow knowledge on your machine. Optimized for **Chinese memories**: verbatim ingest (no LLM rewrite on write), hybrid search with Chinese-aware keyword tokenization + bge-m3 vectors + RRF fusion. Inject context via IDE hooks or query on demand through MCP. No cloud dependency — SQLite, Chroma, and Ollama on your machine.
 
 [中文文档 → README.md](README.md)
 
@@ -41,9 +41,7 @@ pip install -r requirements.txt
 bash scripts/setup.sh
 ```
 
-`setup.sh` deploys runtime to `~/.memory/runtime/` and creates the default pool. On a clean machine the pool is `~/.memory/pools/default/`; it also copies example `config.json` and `.env` into the pool.
-
-> **Legacy `~/.mem0/` present?** If `~/.mem0/active_memories.db` exists and you have not migrated, `setup.sh` may point the default pool at `~/.mem0`. Run [migration](docs/v2-migration.md) first, or force greenfield layout: `MEMORY_POOL_DIR=~/.memory/pools/default bash scripts/setup.sh`.
+`setup.sh` deploys runtime to `~/.memory/runtime/` and creates the default pool at `~/.memory/pools/default/`, copying example `config.json` and `.env` into the pool.
 
 ### Configure LLM / embedder (optional)
 
@@ -124,7 +122,7 @@ Details → [docs/architecture.md](docs/architecture.md) · [docs/v2-design.md](
 | [cursor-setup.md](docs/cursor-setup.md) | Cursor MCP + hooks |
 | [claude-code-setup.md](docs/claude-code-setup.md) | Claude Code MCP + hooks |
 | [daily-review-integration.md](docs/daily-review-integration.md) | Optional daily review (`INSTALL_DAILY_REVIEW_HELPERS=1` for helper script) |
-| [v2-migration.md](docs/v2-migration.md) | Upgrade from mem0-local-enhanced |
+| [history.md](docs/history.md) | Project lineage (predecessor mem0-local-enhanced, read-only) |
 
 ---
 
@@ -169,20 +167,6 @@ After changing source under `src/` or `configs/`, redeploy (runtime holds config
 ```bash
 bash scripts/setup.sh
 ```
-
----
-
-## Upgrading from mem0-local-enhanced
-
-If you previously used [mem0-local-enhanced](https://github.com/gaoyong111/mem0-local-enhanced) with data in `~/.mem0/`:
-
-```bash
-bash scripts/migrate_full_to_v2.sh
-```
-
-See [docs/v2-migration.md](docs/v2-migration.md) for rollback and manual steps. New installs can skip this entirely.
-
-> **v2.0.1 breaking**: From this release, runtime **no longer reads** `MEM0_*` env vars. After data migration, follow [post-migration cleanup](docs/v2-migration.md#迁移后清理可选) (remove `MEM0_*` from pool `.env`, drop `~/.mem0` symlink, prune orphan Chroma collections). GitHub **v2.0.0** still accepts legacy env names; use **≥ v2.0.1** or main after commit `64ff574`.
 
 ---
 

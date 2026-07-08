@@ -141,10 +141,10 @@ python3 ~/.memory/runtime/search_context.py '测试'
 ## 常见问题
 
 **MCP 启动失败？**  
-Ollama 未运行或池路径错误。确认 `MEMORY_DIR` 与 registry 一致。迁移后去掉 `MEMORY_CHROMA_COLLECTION=mem0`。
+Ollama 未运行或池路径错误。确认 `MEMORY_DIR` 与 registry 一致。
 
 **环境变量？**  
-仅需 `MEMORY_DIR` + `PYTHONPATH`。勿设 `MEM0_*`（**v2.0.1** 起 runtime 不读取；GitHub Release 请用 ≥ v2.0.1 或 main 上 `64ff574` 之后）。
+仅需 `MEMORY_DIR` + `PYTHONPATH`（见 [v2-design.md](v2-design.md#环境变量)）。
 
 **写入时中文变英文？**  
 v2 原样入库，无 infer 改写。
@@ -154,6 +154,3 @@ v2 原样入库，无 infer 改写。
 
 **与 Cursor 共用数据吗？**  
 是，同一默认池。
-
-**从 mem0-local 升级？**  
-见 [v2-migration.md](v2-migration.md)。

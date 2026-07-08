@@ -1,4 +1,4 @@
-"""写入策略 B/D/E — 无 mem0 依赖，infer 已移除。"""
+"""写入策略 B/D/E — infer 已移除，原样入库。"""
 
 from __future__ import annotations
 

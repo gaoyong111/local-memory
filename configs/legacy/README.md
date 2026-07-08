@@ -5,7 +5,7 @@
 本目录保留旧版 mem0 嵌套格式，仅供：
 
 - 对照 v1 → v2 字段差异
-- `scripts/migrate_config.py` 迁移参考
+- `scripts/legacy/migrate_config.py` 迁移参考
 
 | 文件 | 说明 |
 |------|------|

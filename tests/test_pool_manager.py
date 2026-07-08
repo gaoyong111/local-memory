@@ -21,7 +21,7 @@ class PoolManagerTests(unittest.TestCase):
         default_dir.mkdir(parents=True)
         other_dir.mkdir(parents=True)
         (default_dir / 'pool.meta.json').write_text(
-            json.dumps({'pool_id': 'default', 'chroma_collection': 'mem0'}),
+            json.dumps({'pool_id': 'default', 'chroma_collection': 'memories'}),
             encoding='utf-8',
         )
         (other_dir / 'pool.meta.json').write_text(

@@ -1,4 +1,4 @@
-"""local-memory MCP server — 混合检索，B/D/E 写入策略，无 mem0 依赖"""
+"""local-memory MCP server — 混合检索，B/D/E 写入策略。"""
 
 from __future__ import annotations
 

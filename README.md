@@ -2,7 +2,7 @@
 
 **面向 AI 编程助手的本地持久化记忆系统 —— 中文友好，原样入库。**
 
-在本地存储中文事实、偏好与流程知识；通过 IDE Hook 自动注入上下文，或通过 MCP 按需检索。数据不出本机，不依赖 mem0 库 —— 底层为 SQLite、Chroma 与 Ollama embedding。
+在本地存储中文事实、偏好与流程知识；通过 IDE Hook 自动注入上下文，或通过 MCP 按需检索。数据不出本机 —— 底层为 SQLite、Chroma 与 Ollama embedding。
 
 核心设计：**写入什么存什么**，不经 LLM 推断改写，避免中文被翻译、模块名被泛化；混合检索针对中文 query 优化（滑窗分词 + bge-m3 向量 + RRF 融合）。
 
@@ -43,9 +43,7 @@ pip install -r requirements.txt
 bash scripts/setup.sh
 ```
 
-`setup.sh` 会部署运行时代码到 `~/.memory/runtime/`，并创建默认池。全新环境下池位于 `~/.memory/pools/default/`，同时复制示例 `config.json` 与 `.env`。
-
-> **本机仍有旧版 `~/.mem0/`？** 若存在 `~/.mem0/active_memories.db` 且尚未迁移，`setup.sh` 可能将默认池指向 `~/.mem0`。请先完成 [v2 迁移](docs/v2-migration.md)，或强制 greenfield：`MEMORY_POOL_DIR=~/.memory/pools/default bash scripts/setup.sh`。
+`setup.sh` 会部署运行时代码到 `~/.memory/runtime/`，并创建默认池。池位于 `~/.memory/pools/default/`，同时复制示例 `config.json` 与 `.env`。
 
 ### 配置 LLM / embedder（可选）
 
@@ -124,7 +122,7 @@ python3 ~/.memory/runtime/search_context.py '测试'
 | [cursor-setup.md](docs/cursor-setup.md) | Cursor MCP + Hook |
 | [claude-code-setup.md](docs/claude-code-setup.md) | Claude Code MCP + Hook |
 | [daily-review-integration.md](docs/daily-review-integration.md) | 可选：每日复盘（`INSTALL_DAILY_REVIEW_HELPERS=1` 部署辅助脚本） |
-| [v2-migration.md](docs/v2-migration.md) | 从 mem0-local-enhanced 升级 |
+| [history.md](docs/history.md) | 项目沿革（前身 mem0-local-enhanced，只读） |
 
 ---
 
@@ -169,20 +167,6 @@ python3 -m unittest discover -s tests -v
 ```bash
 bash scripts/setup.sh
 ```
-
----
-
-## 从 mem0-local-enhanced 升级
-
-若曾使用 [mem0-local-enhanced](https://github.com/gaoyong111/mem0-local-enhanced)，数据在 `~/.mem0/`：
-
-```bash
-bash scripts/migrate_full_to_v2.sh
-```
-
-回滚与分步说明见 [docs/v2-migration.md](docs/v2-migration.md)。全新安装可跳过。
-
-> **v2.0.1 breaking**：自该版本起 runtime **不再读取** `MEM0_*` env。若已完成 v1→v2 数据迁移，请继续执行文档中的「[迁移后清理](docs/v2-migration.md#迁移后清理可选)」（去掉 pool `.env` 中 `MEM0_*`、删除 `~/.mem0` symlink、清理 Chroma 孤儿 collection 等）。GitHub **v2.0.0** Release 仍兼容旧 env 名；请升级到 **≥ v2.0.1** 或使用 main 上 `64ff574` 之后的代码。
 
 ---
 

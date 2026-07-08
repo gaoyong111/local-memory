@@ -116,7 +116,7 @@ python3 ~/.memory/runtime/search_context.py '测试'
 ## 常见问题
 
 **MCP server errored？**  
-检查 Python 路径、`MEMORY_DIR`、依赖是否安装。迁移后 env 若仍含 `MEMORY_CHROMA_COLLECTION=mem0` 会导致向量检索失败 —— 去掉该 env。
+检查 Python 路径、`MEMORY_DIR`、依赖是否安装。`MEMORY_CHROMA_COLLECTION` 一般无需设置，以 `pool.meta.json` 为准（默认 `memories`）。
 
 **工具数只有 8 个？**  
 注册应有 **9 个**（含 `run_episodic_grooming`）。Reload Window → 重启 MCP → 必要时 `pkill -f '.memory/runtime/mcp_server.py'` 清僵尸进程。
@@ -127,8 +127,5 @@ python3 ~/.memory/runtime/search_context.py '测试'
 **与 Claude Code 共用数据吗？**  
 是，共用 `~/.memory/pools/default/`（或 registry 当前 active pool）。
 
-**从 mem0-local 升级？**  
-见 [v2-migration.md](v2-migration.md)，验证通过后删除旧 MCP 条目。迁移完成见文档「[迁移后清理](v2-migration.md#迁移后清理可选)」。
-
 **环境变量？**  
-仅需 `MEMORY_DIR` + `PYTHONPATH`。勿设 `MEM0_*`（**v2.0.1** 起 runtime 不读取；GitHub Release 请用 ≥ v2.0.1 或 main 上 `64ff574` 之后）。
+仅需 `MEMORY_DIR` + `PYTHONPATH`（见 [v2-design.md](v2-design.md#环境变量)）。

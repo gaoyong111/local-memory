@@ -2,7 +2,7 @@
 
 local-memory v2 的概念模型、模块职责与关键决策。
 
-[架构详解 → architecture.md](architecture.md) · [升级指南 → v2-migration.md](v2-migration.md)
+[架构详解 → architecture.md](architecture.md) · [项目沿革 → history.md](history.md)
 
 ---
 
@@ -12,7 +12,7 @@ local-memory v2 的概念模型、模块职责与关键决策。
 
 - **原样入库** — 写什么存什么，不经 LLM 改写，避免中文被翻译、模块名被泛化
 - **混合检索** — SQLite 关键词（中文滑窗分词）+ Chroma 向量（bge-m3）RRF 融合
-- **完全本地化** — SQLite + Chroma + Ollama，不依赖 mem0 库或云端记忆服务
+- **完全本地化** — SQLite + Chroma + Ollama，不依赖云端记忆服务或第三方记忆框架
 
 混合检索、多表同步、写入策略、grooming 等核心能力均为自研代码，不委托给记忆框架。
 
@@ -159,7 +159,7 @@ MCP、viewer、E 去重全部收敛到这两个函数，无双路径。
 
 ## 配置格式
 
-v2 扁平 config（无 mem0 字段）：
+v2 扁平 config：
 
 ```json
 {
@@ -184,7 +184,7 @@ v2 扁平 config（无 mem0 字段）：
 
 LLM provider 支持：`ollama`、`openai_compatible`、`anthropic`。
 
-密钥从池 `.env` 经 `api_key_env` 加载。示例：`configs/config_ollama.example.json`、`configs/config_api.example.json`（v1 mem0 格式见 `configs/legacy/`）。
+密钥从池 `.env` 经 `api_key_env` 加载。示例：`configs/config_ollama.example.json`、`configs/config_api.example.json`（前身 v1 格式见 [configs/legacy/](../configs/legacy/)）。
 
 `config_api.example.json` 仅 LLM 走远程 API；**embedder 仍须本地 Ollama**（混合检索依赖向量）。密钥变量名见各示例中的 `api_key_env`，对应写入池目录 `.env`。
 
@@ -224,7 +224,7 @@ LLM provider 支持：`ollama`、`openai_compatible`、`anthropic`。
 | 备份 | `pool_cli.py backup <id>` | — |
 | 克隆 | `pool_cli.py clone <src> <dst>` | — |
 
-切换更新 `registry.active_pool`。若 MCP env 设了 `MEMORY_CHROMA_COLLECTION` 会覆盖 `pool.meta.json` —— 迁移后去掉旧 env。
+切换更新 `registry.active_pool`。`MEMORY_CHROMA_COLLECTION` 仅在需覆盖 `pool.meta.json` 时设置。
 
 ---
 
@@ -232,10 +232,10 @@ LLM provider 支持：`ollama`、`openai_compatible`、`anthropic`。
 
 | 议题 | 决定 | 理由 |
 |------|------|------|
-| 移除 mem0 | 是 | 核心逻辑已是自研；mem0 只增加依赖 |
+| 自研存储栈 | 是 | 混合检索与写入策略均为自研；不绑定第三方记忆框架 |
 | 原样入库 | 永久 | infer 导致信息丢失、中文变英文、记忆碎片化 |
 | 关键词数据源 | 仅 `active_memories.db` | 审计表不参与检索；删除由 archive 过滤 |
-| Chroma collection | `memories` | 与 mem0 命名切割 |
+| Chroma collection | `memories` | 池内统一命名 |
 | 删除 reason | 必填 | 审计与 grooming 可追溯 |
 | E 去重时机 | 写入后 | 与 v1 一致；DROP_NEW 时回滚删除 |
 | write 越权 | 软警告 + 仍写 | 避免多项目场景静默丢数据 |
@@ -257,12 +257,10 @@ LLM provider 支持：`ollama`、`openai_compatible`、`anthropic`。
 | `MEMORY_FALLBACK_CONFIG` | 无 `fallback_llm` 时的兜底配置文件 | 无 |
 | `MEMORY_PROJECT_ALIASES` | project 别名 JSON 路径 | pool 内 `project_aliases.json` |
 
-> **Breaking（v2.0.1）**：运行时代码**不再读取** `MEM0_*` 环境变量（commit `64ff574`）。迁移完成后 pool `.env` 与 IDE 配置仅保留 `MEMORY_*`。GitHub Release **v2.0.0** 仍含旧别名；请使用 **≥ v2.0.1** 或 main 最新代码。
-
 新环境只需 `MEMORY_DIR` + `PYTHONPATH`。
 
 ---
 
 ## 历史说明
 
-local-memory v2 是 **mem0-local-enhanced** 的继任者。v1 在 mem0 库之上叠加了混合检索与写入策略；v2 去掉该依赖，用户可见能力不变。已有数据升级见 [v2-migration.md](v2-migration.md)。
+local-memory 是前身 [mem0-local-enhanced](https://github.com/gaoyong111/mem0-local-enhanced)（基于开源 mem0ai 库的本地增强版）的继任者。v2 去掉该依赖，用户可见能力不变。详见 [history.md](history.md)。
