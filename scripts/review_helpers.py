@@ -1,4 +1,4 @@
-"""每日复盘辅助：mem0 快照/diff、漏跑检测、cron 续期日志、会话清单。不依赖 Ollama。"""
+"""每日复盘辅助：local-memory 快照/diff、漏跑检测、cron 续期日志、会话清单。不依赖 Ollama。"""
 
 from __future__ import annotations
 
@@ -11,22 +11,21 @@ import sys
 from datetime import datetime
 from typing import Any
 
-MEM0_DIR = os.path.expanduser(os.getenv('MEM0_DIR', '~/.mem0'))
 MEMORY_DIR = os.path.expanduser(os.getenv('MEMORY_DIR', '~/.memory'))
 _SRC_DIR = os.path.join(os.path.dirname(__file__), '..', 'src')
 _RUNTIME_DIR = os.path.expanduser(os.getenv('MEMORY_RUNTIME', os.path.join(MEMORY_DIR, 'runtime')))
-for path in (_RUNTIME_DIR, _SRC_DIR, MEM0_DIR):
+for path in (_RUNTIME_DIR, _SRC_DIR):
     if path and os.path.isdir(path) and path not in sys.path:
         sys.path.insert(0, path)
 REVIEW_DIR = os.path.expanduser('~/daily-reviews')
 DATA_DIR = os.path.join(REVIEW_DIR, '.data')
 def _resolve_history_db() -> str:
     try:
-        from memory_paths import HISTORY_DB as POOL_HISTORY
+        from memory_paths import history_db_path
 
-        return str(POOL_HISTORY)
+        return str(history_db_path())
     except Exception:
-        return os.path.join(MEM0_DIR, 'history.db')
+        return os.path.expanduser('~/.memory/pools/default/history.db')
 
 
 HISTORY_DB = _resolve_history_db()
@@ -313,11 +312,11 @@ def build_snapshot() -> dict[str, Any]:
 
 def snapshot_path(date_str: str | None = None) -> str:
     date_str = date_str or datetime.now().strftime('%Y%m%d')
-    return os.path.join(DATA_DIR, f'mem0-snapshot-{date_str}.json')
+    return os.path.join(DATA_DIR, f'memory-snapshot-{date_str}.json')
 
 
 def find_latest_snapshot() -> str | None:
-    paths = sorted(glob.glob(os.path.join(DATA_DIR, 'mem0-snapshot-*.json')))
+    paths = sorted(glob.glob(os.path.join(DATA_DIR, 'memory-snapshot-*.json')))
     return paths[-1] if paths else None
 
 
@@ -515,11 +514,11 @@ def main() -> int:
     parser = argparse.ArgumentParser(description='daily-review helpers')
     sub = parser.add_subparsers(dest='command', required=True)
 
-    p_snapshot = sub.add_parser('snapshot', help='写入 mem0 快照')
+    p_snapshot = sub.add_parser('snapshot', help='写入 local-memory 快照')
     p_snapshot.add_argument('--date', help='YYYYMMDD，默认今天')
     p_snapshot.set_defaults(func=cmd_snapshot)
 
-    p_diff = sub.add_parser('diff', help='对比 baseline 与当前 mem0')
+    p_diff = sub.add_parser('diff', help='对比 baseline 与当前 local-memory')
     p_diff.add_argument('--baseline', default='latest', help='快照路径或 latest')
     p_diff.add_argument('--output', help='diff 报告输出路径')
     p_diff.set_defaults(func=cmd_diff)

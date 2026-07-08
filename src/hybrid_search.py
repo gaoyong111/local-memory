@@ -35,8 +35,8 @@ SUBSEQ_RATIO = 0.5
 SUBSEQ_VEC_GATE_MIN = 15
 SUBSEQ_VEC_GATE_MAX = 30
 
-# Phase 4D：keyword 相对截断 kw_score < top1 × ratio 不进池；0 或 MEM0_KW_REL_RATIO=0 关闭
-KW_RELATIVE_RATIO = float(os.getenv('MEM0_KW_REL_RATIO', '0.25'))
+# Phase 4D：keyword 相对截断 kw_score < top1 × ratio 不进池；0 或 MEMORY_KW_REL_RATIO=0 关闭
+KW_RELATIVE_RATIO = float(os.getenv('MEMORY_KW_REL_RATIO', '0.25'))
 
 # project 配额：RRF 上加匹配奖励分，再 project 前 3 + 全局保底 2
 RRF_PROJECT_BONUS = 0.005
@@ -50,8 +50,8 @@ _CJK_RE = re.compile(r'[一-鿿]')
 LANG_VECTOR_OVERSAMPLE = 4
 
 # 向量相对阈值：vec_score < top1 - δ 视为未命中（不进 vector_results → vec_rank=0）
-# 设 0 或环境变量 MEM0_VECTOR_REL_MARGIN=0 可关闭
-VECTOR_SCORE_REL_MARGIN = float(os.getenv('MEM0_VECTOR_REL_MARGIN', '0.10'))
+# 设 0 或环境变量 MEMORY_VECTOR_REL_MARGIN=0 可关闭
+VECTOR_SCORE_REL_MARGIN = float(os.getenv('MEMORY_VECTOR_REL_MARGIN', '0.10'))
 
 RESULTS_HEADER = '[local-memory 相关记忆]'
 HOOK_RESULTS_HEADER = '[local-memory 自动注入的相关记忆]'
@@ -63,7 +63,7 @@ GENERIC_DIR_NAMES = frozenset({
 
 def _load_project_aliases() -> dict[str, str]:
     """从池目录 project_aliases.json 加载目录名 -> project 映射（不硬编码在源码）。"""
-    path = os.getenv('MEM0_PROJECT_ALIASES') or os.getenv('MEMORY_PROJECT_ALIASES') or str(PROJECT_ALIASES_PATH)
+    path = os.getenv('MEMORY_PROJECT_ALIASES') or str(PROJECT_ALIASES_PATH)
     if not os.path.isfile(path):
         return {}
     try:
@@ -100,7 +100,7 @@ def get_chroma_client() -> Any:
 
 
 def get_chroma_collection(client: Any | None = None) -> Any:
-    """统一 collection 名解析（memories / 过渡期 mem0）。"""
+    """统一 collection 名解析（memories）。"""
     client = client or get_chroma_client()
     return _pool_chroma_collection(client)
 

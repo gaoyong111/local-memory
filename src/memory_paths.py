@@ -1,4 +1,4 @@
-"""local-memory 运行时路径 — MEMORY_DIR / pool registry / 兼容 MEM0_DIR。"""
+"""local-memory 运行时路径 — MEMORY_DIR / pool registry。"""
 
 from __future__ import annotations
 
@@ -9,7 +9,7 @@ from contextvars import ContextVar
 from pathlib import Path
 from typing import Any, Iterator
 
-DEFAULT_USER = os.getenv('MEMORY_USER_ID', os.getenv('MEM0_USER_ID', 'default-user'))
+DEFAULT_USER = os.getenv('MEMORY_USER_ID', 'default-user')
 
 _workspace_pool: ContextVar[str | None] = ContextVar('workspace_pool', default=None)
 
@@ -31,18 +31,9 @@ def _expand(path: str | Path) -> Path:
 
 
 def resolve_memory_root() -> Path:
-    """数据根：MEMORY_DIR → MEM0_DIR（若为 pool 根）→ ~/.memory。"""
+    """数据根：MEMORY_DIR → ~/.memory。"""
     if os.environ.get('MEMORY_DIR'):
         return _expand(os.environ['MEMORY_DIR'])
-    mem0_dir = os.environ.get('MEM0_DIR')
-    if mem0_dir:
-        root = _expand(mem0_dir)
-        registry = root.parent / 'registry.json' if root.name == 'default' else root / 'registry.json'
-        # MEM0_DIR 指向 pool 目录时，registry 在 ~/.memory/registry.json
-        mem_root = _expand('~/.memory')
-        if (mem_root / 'registry.json').is_file():
-            return mem_root
-        return root
     return _expand('~/.memory')
 
 
@@ -57,15 +48,11 @@ def load_registry(root: Path | None = None) -> dict[str, Any]:
 
 def resolve_pool_path(pool_id: str | None = None) -> Path:
     """pool_id=None → ContextVar → env MEMORY_POOL → registry.active_pool → 'default'。"""
-    mem0_dir = os.environ.get('MEM0_DIR')
     root = resolve_memory_root()
     registry_path = root / 'registry.json'
 
     if pool_id is None:
         pool_id = _workspace_pool.get()
-
-    if not os.environ.get('MEMORY_DIR') and mem0_dir and not registry_path.exists():
-        return _expand(mem0_dir)
 
     if pool_id is None:
         if registry_path.exists():
@@ -86,15 +73,6 @@ def resolve_pool_path(pool_id: str | None = None) -> Path:
             return _expand(entry_path)
 
     pools_path = root / 'pools' / (pool_id or 'default')
-    if pools_path.is_dir():
-        return pools_path.resolve()
-
-    # 无 registry 时 fallback：MEM0_DIR 或 ~/.mem0
-    if mem0_dir and _expand(mem0_dir).is_dir():
-        return _expand(mem0_dir)
-    legacy = _expand('~/.mem0')
-    if legacy.is_dir():
-        return legacy
     return pools_path.resolve()
 
 
@@ -124,14 +102,12 @@ def get_chroma_collection_name(pool_path: Path | None = None) -> str:
         meta = json.loads(meta_file.read_text(encoding='utf-8'))
         if meta.get('chroma_collection'):
             return meta['chroma_collection']
-    return os.environ.get('MEM0_CHROMA_COLLECTION', 'memories')
+    return 'memories'
 
 
 def resolve_config_path(pool_path: Path | None = None) -> Path:
     if os.environ.get('MEMORY_CONFIG'):
         return _expand(os.environ['MEMORY_CONFIG'])
-    if os.environ.get('MEM0_CONFIG'):
-        return _expand(os.environ['MEM0_CONFIG'])
     if pool_path is None:
         pool_path = resolve_pool_path()
     for name in ('config.json', 'config_local.json'):
@@ -179,7 +155,7 @@ def merge_hints_path() -> Path:
 
 
 def project_aliases_path() -> Path:
-    env = os.environ.get('MEMORY_PROJECT_ALIASES') or os.environ.get('MEM0_PROJECT_ALIASES')
+    env = os.environ.get('MEMORY_PROJECT_ALIASES')
     if env:
         return _expand(env)
     return resolve_pool_file('project_aliases.json')

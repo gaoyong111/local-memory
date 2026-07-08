@@ -58,7 +58,7 @@ def _resolve_llm_configs() -> tuple[dict[str, Any], dict[str, Any] | None]:
 
     # v1 双文件兜底
     if not fallback:
-        fallback_path = os.environ.get('MEM0_FALLBACK_CONFIG', '')
+        fallback_path = os.environ.get('MEMORY_FALLBACK_CONFIG', '')
         expanded = Path(fallback_path).expanduser() if fallback_path else None
         if expanded and expanded.is_file():
             fb_config = _read_config(str(expanded))

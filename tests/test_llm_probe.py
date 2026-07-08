@@ -29,14 +29,14 @@ class LlmEndpointUrlTests(unittest.TestCase):
 
 class ResolveLlmConfigsTests(unittest.TestCase):
     @mock.patch('llm_client._read_config')
-    def test_mem0_fallback_config_expanduser(self, mock_read) -> None:
+    def test_memory_fallback_config_expanduser(self, mock_read) -> None:
         mock_read.side_effect = [
             {'llm': {'provider': 'anthropic', 'base_url': 'http://primary'}},
             {'llm': {'provider': 'ollama', 'base_url': 'http://fallback-ollama'}},
         ]
         fake_expanded = mock.Mock()
         fake_expanded.is_file.return_value = True
-        with mock.patch.dict(os.environ, {'MEM0_FALLBACK_CONFIG': '~/fallback-config.json'}, clear=False):
+        with mock.patch.dict(os.environ, {'MEMORY_FALLBACK_CONFIG': '~/fallback-config.json'}, clear=False):
             with mock.patch('llm_client.Path') as mock_path_cls:
                 mock_path_cls.return_value.expanduser.return_value = fake_expanded
                 primary, fallback = _resolve_llm_configs()

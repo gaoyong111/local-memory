@@ -122,7 +122,7 @@ python3 ~/.memory/runtime/search_context.py '测试'
 注册应有 **9 个**（含 `run_episodic_grooming`）。Reload Window → 重启 MCP → 必要时 `pkill -f '.memory/runtime/mcp_server.py'` 清僵尸进程。
 
 **Hook 不注入？**  
-核对 Python 绝对路径、env 变量、timeout；确认 Ollama 已启动。
+核对 Python 绝对路径、env 变量、timeout；确认 Ollama 已启动。Hook 用 `[local-memory 自动注入的相关记忆]` + 简洁条目；MCP `search_memory` 返回带分数的调试格式（无注入头）。
 
 **与 Claude Code 共用数据吗？**  
 是，共用 `~/.memory/pools/default/`（或 registry 当前 active pool）。

@@ -8,7 +8,6 @@
 
 RUNTIME_DIR="${MEMORY_RUNTIME:-$HOME/.memory/runtime}"
 export MEMORY_DIR="${MEMORY_DIR:-$HOME/.memory}"
-export MEM0_DIR="${MEM0_DIR:-$HOME/.mem0}"
 export PYTHONPATH="${PYTHONPATH:-$RUNTIME_DIR}:$PYTHONPATH"
 
 if [[ -n "${1:-}" ]]; then

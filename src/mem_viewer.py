@@ -11,7 +11,7 @@ import uuid
 from collections import defaultdict
 from datetime import datetime, timezone
 
-# v2 运行时代码在 ~/.memory/runtime/；数据路径走 MEMORY_DIR / MEM0_DIR 环境变量，勿把 ~/.mem0 插入 sys.path（会 shadow runtime 模块）
+# 运行时代码在 ~/.memory/runtime/；数据路径走 MEMORY_DIR，勿把 pool 目录插入 sys.path
 _RUNTIME_DIR = os.path.dirname(os.path.abspath(__file__))
 if _RUNTIME_DIR not in sys.path:
     sys.path.insert(0, _RUNTIME_DIR)
@@ -51,7 +51,7 @@ from memory_lineage import build_timeline, parse_merged_from, record_event, reco
 # 配置
 HOST = 'localhost'
 PORT = 8765
-DEFAULT_USER = os.getenv('MEM0_USER_ID', 'default-user')
+DEFAULT_USER = os.getenv('MEMORY_USER_ID', 'default-user')
 VIEWER_WORKSPACE_ROOT = os.getenv('WORKSPACE_ROOT') or None
 # 与 mcp_server.py DEFAULT_MAX_RESULTS 保持一致，便于对比检索效果
 MCP_SEARCH_MAX_RESULTS = 8
@@ -343,7 +343,7 @@ def compute_edges(memories: list[dict]) -> list[dict]:
     return edges
 
 
-def _load_mem0_config() -> dict:
+def _load_pool_config() -> dict:
     """读取 pool config.json（与 llm_client / MCP 对齐）。"""
     config_path = resolve_config_path()
     try:
