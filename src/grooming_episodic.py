@@ -213,7 +213,7 @@ def _rule_based_decision(
                 target_category='workflow',
                 reason='含 Why/How 且偏流程方法论，建议升 workflow',
             )
-        if any(word in lower for word in ('api', 'bug', 'provider', 'chroma', 'mem0', 'local-memory', 'local memory')):
+        if any(word in lower for word in ('api', 'bug', 'provider', 'chroma', 'local-memory', 'local memory')):
             return GroomingDecision(
                 action='promote',
                 target_category='reference',
