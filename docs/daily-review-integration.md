@@ -28,7 +28,7 @@
                              │
 ┌────────────────────────────▼────────────────────────────────┐
 │ 每日复盘（定时或手动）                                        │
-│ Preflight → 采集 → 重试 pending → 写文档 → grooming         │
+│ Preflight → 采集 → pending重试 → 写文档 → 进化提取 → diff → grooming      │
 └─────────────────────────────────────────────────────────────┘
 ```
 
@@ -42,7 +42,7 @@
 | `sync_pending/` | 多表同步失败 |
 | MCP `add_memory` | 写入提炼后的 reference / workflow / behavior |
 | MCP `run_episodic_grooming` | 复盘后批处理 episodic |
-| 快照 diff | 对比复盘前后记忆状态 |
+| 快照 diff | 对比复盘前后记忆状态（**进化提取之后**执行，确保本次新增认知纳入 diff） |
 
 池路径：`~/.memory/pools/<active>/`。
 
@@ -129,7 +129,19 @@ run_episodic_grooming(dry_run=false)
 
 ## review_helpers 部署（可选）
 
-`scripts/review_helpers.py` 供 daily-review skill 采集 git / 会话。默认 `setup.sh` **不会**复制到 `~/.claude/skills/daily-review/scripts/`，避免覆盖本地 skill 定制；`review_helpers.py` 仍会随第 2 步进入 `~/.memory/runtime/scripts/`（运行时代码，非 skill 安装）。
+`scripts/review_helpers.py` 供 daily-review skill 采集 git / 会话 / 工具统计。默认 `setup.sh` **不会**复制到 `~/.claude/skills/daily-review/scripts/`，避免覆盖本地 skill 定制；`review_helpers.py` 仍会随第 2 步进入 `~/.memory/runtime/scripts/`（运行时代码，非 skill 安装）。
+
+**子命令**（均走 `python3`，don't ask 模式下比复合 Bash 更可靠）：
+
+| 子命令 | 用途 |
+|--------|------|
+| `check-missed-run` | 漏跑检测 + 返回扫描起点 |
+| `list-sessions` | Claude/Cursor 会话清单 |
+| `git-log` | 扫描 `~/Desktop/h5_release/` git 提交 |
+| `tool-stats` | 工具调用次数与授权方式 |
+| `diff` / `snapshot` | local-memory 快照与对比（diff 在进化提取**之后**） |
+| `record-scan-end` | 写入下次扫描起点（cron lastFiredAt，续期后 fallback renewal log） |
+| `log-cron-renewal` | cron 续期日志（含 lastFiredAt） |
 
 启用 skill 辅助（**会覆盖**目标路径已有文件）：
 
@@ -147,10 +159,11 @@ INSTALL_DAILY_REVIEW_HELPERS=1 bash scripts/setup.sh
 
 1. 部署 local-memory 并注册 MCP
 2. 触发时 Preflight
-3. 采集 git / 会话 / TODO
+3. 采集 git / 会话 / TODO（`review_helpers.py git-log`、`list-sessions`、`tool-stats`）
 4. MCP 健康则 `retry_pending`
-5. 提炼并 `add_memory`
-6. 可选：`run_episodic_grooming` + 快照 diff
+5. 提炼并 `add_memory`（进化提取）
+6. `diff --baseline latest` 对比记忆变化
+7. 可选：`run_episodic_grooming` + `snapshot`
 
 本文描述的是 local-memory 暴露的**接口**，不绑定特定 skill 或 cron 实现。
 

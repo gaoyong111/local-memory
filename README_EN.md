@@ -121,7 +121,7 @@ Details → [docs/architecture.md](docs/architecture.md) · [docs/v2-design.md](
 | [mem-viewer-design.md](docs/mem-viewer-design.md) | Web UI specification |
 | [cursor-setup.md](docs/cursor-setup.md) | Cursor MCP + hooks |
 | [claude-code-setup.md](docs/claude-code-setup.md) | Claude Code MCP + hooks |
-| [daily-review-integration.md](docs/daily-review-integration.md) | Optional daily review (`INSTALL_DAILY_REVIEW_HELPERS=1` for helper script) |
+| [daily-review-integration.md](docs/daily-review-integration.md) | Optional daily review (`review_helpers.py`: `git-log`, `tool-stats`, `diff`, etc.; `INSTALL_DAILY_REVIEW_HELPERS=1` to deploy to skill) |
 | [history.md](docs/history.md) | Project lineage (predecessor mem0-local-enhanced, read-only) |
 
 ---

@@ -121,7 +121,7 @@ python3 ~/.memory/runtime/search_context.py '测试'
 | [mem-viewer-design.md](docs/mem-viewer-design.md) | Web UI 规格 |
 | [cursor-setup.md](docs/cursor-setup.md) | Cursor MCP + Hook |
 | [claude-code-setup.md](docs/claude-code-setup.md) | Claude Code MCP + Hook |
-| [daily-review-integration.md](docs/daily-review-integration.md) | 可选：每日复盘（`INSTALL_DAILY_REVIEW_HELPERS=1` 部署辅助脚本） |
+| [daily-review-integration.md](docs/daily-review-integration.md) | 可选：每日复盘（`review_helpers.py` 含 `git-log` / `tool-stats` / `diff` 等子命令；`INSTALL_DAILY_REVIEW_HELPERS=1` 部署到 skill） |
 | [history.md](docs/history.md) | 项目沿革（前身 mem0-local-enhanced，只读） |
 
 ---

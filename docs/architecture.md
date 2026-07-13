@@ -223,6 +223,8 @@ MCP 启动探活 LLM；失败仅 warning —— 关键词检索仍可用。
 - Hook 默认 timeout 20s；Ollama 慢时可调大
 - Ollama 未启动：MCP 可启动，关键词路部分可用，向量 add/search 不可用
 - 记忆量极大（数千条+）时可评估 SQLite FTS5 / rerank
+- 每日复盘 `memory diff` 须在**进化提取**（`add_memory`）之后执行，否则本次新增认知不进 diff；详见 [daily-review-integration.md](daily-review-integration.md)
+- `review_helpers.py` 有三处部署：`local-memory/scripts/`（源码）、`~/.memory/runtime/scripts/`（setup 默认）、`~/.claude/skills/daily-review/scripts/`（`INSTALL_DAILY_REVIEW_HELPERS=1`）；改 helper 后须同步 skill 路径（复盘 cron 实际调用处）
 
 ---
 

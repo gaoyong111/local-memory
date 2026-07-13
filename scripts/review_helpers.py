@@ -6,10 +6,13 @@ import argparse
 import glob
 import json
 import os
+import re
 import sqlite3
+import subprocess
 import sys
+from collections import Counter
 from datetime import datetime
-from typing import Any
+from typing import Any, Iterator
 
 MEMORY_DIR = os.path.expanduser(os.getenv('MEMORY_DIR', '~/.memory'))
 _SRC_DIR = os.path.join(os.path.dirname(__file__), '..', 'src')
@@ -32,6 +35,17 @@ HISTORY_DB = _resolve_history_db()
 CRON_RENEWAL_LOG = os.path.join(REVIEW_DIR, 'cron-renewal.log')
 LAST_SCAN_END_FILE = os.path.join(DATA_DIR, 'last-scan-end.txt')
 MISSED_RUN_HOURS = 36
+DEFAULT_GIT_ROOT = os.path.expanduser('~/Desktop/h5_release')
+_SETTINGS_FILES = (
+    os.path.expanduser('~/.claude/settings.json'),
+    os.path.expanduser('~/.claude/settings.local.json'),
+)
+_BASH_FIRST_TOKENS = frozenset({
+    'git', 'python3', 'python', 'rg', 'find', 'ls', 'cat', 'curl', 'npx', 'npm', 'node',
+    'sqlite3', 'ollama', 'pip', 'pip3', 'mkdir', 'cp', 'open', 'cd', 'echo', 'wc', 'head',
+    'sed', 'stat', 'sort', 'defaults', 'mdfind', 'env', 'chmod', 'sleep', 'export', 'lsof',
+    'ffprobe', 'ffmpeg', 'whisper', 'tesseract', 'cargo', 'brew', 'claude',
+})
 _LOCAL_CONFIG = os.path.join(os.path.dirname(__file__), 'review_helpers.local.json')
 
 
@@ -434,7 +448,7 @@ def cmd_record_scan_end(args: argparse.Namespace) -> int:
 
     默认写 cron lastFiredAt（复盘可能拖到下午才写完，仍以触发时刻为边界）。
     --manual：手动复盘，写 now。
-    无 lastFiredAt 时 fallback 到 now。
+    无 lastFiredAt 时 fallback 到 cron-renewal.log 记录的 lastFiredAt，再 fallback 到 now。
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     if args.manual:
@@ -446,8 +460,13 @@ def cmd_record_scan_end(args: argparse.Namespace) -> int:
             end_ts = cron_fired
             src = 'cron_lastFiredAt'
         else:
-            end_ts = datetime.now().timestamp()
-            src = 'now_fallback'
+            renewal_fired = _load_renewal_last_fired()
+            if renewal_fired:
+                end_ts = renewal_fired
+                src = 'renewal_log_lastFiredAt'
+            else:
+                end_ts = datetime.now().timestamp()
+                src = 'now_fallback'
     end_str = datetime.fromtimestamp(end_ts).strftime('%Y-%m-%d %H:%M')
     with open(LAST_SCAN_END_FILE, 'w', encoding='utf-8') as f:
         f.write(end_str)
@@ -498,11 +517,349 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
     return 0
 
 
+def _find_git_repos(root: str) -> list[str]:
+    """扫描 root 下所有含 .git 的目录（不进入 .git 子树）。"""
+    repos: list[str] = []
+    root = os.path.expanduser(root)
+    if not os.path.isdir(root):
+        return repos
+    for dirpath, dirnames, _ in os.walk(root):
+        if '.git' in dirnames:
+            repos.append(dirpath)
+            dirnames.remove('.git')
+    return sorted(repos)
+
+
+def _escape_md_cell(text: str) -> str:
+    """转义 Markdown 表格单元格中的 | 和换行。"""
+    return text.replace('|', '\\|').replace('\n', ' ').strip()
+
+
+def _git_log_since(repo: str, since: str) -> list[dict[str, str]]:
+    """返回单仓库 since 之后的提交列表。"""
+    fmt = '%H|%h|%ci|%s'
+    try:
+        proc = subprocess.run(
+            ['git', '-C', repo, 'log', f'--since={since}', f'--format={fmt}'],
+            capture_output=True,
+            text=True,
+            timeout=60,
+            check=False,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return []
+    if proc.returncode != 0:
+        return []
+    commits: list[dict[str, str]] = []
+    for line in proc.stdout.splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        parts = line.split('|', 3)
+        if len(parts) != 4:
+            continue
+        full_hash, short_hash, date_raw, subject = parts
+        date_part = date_raw[:16] if len(date_raw) >= 16 else date_raw
+        commits.append({
+            'hash_full': full_hash,
+            'hash': short_hash,
+            'date': date_part,
+            'subject': subject,
+        })
+    return commits
+
+
+def _format_git_log_markdown(projects: list[dict[str, Any]]) -> str:
+    lines: list[str] = []
+    for project in projects:
+        commits = project.get('commits') or []
+        if not commits:
+            continue
+        lines.append(f"### {project['name']}")
+        lines.append('')
+        lines.append('| 提交 | 时间 | 内容 |')
+        lines.append('|------|------|------|')
+        for commit in commits:
+            date_short = commit['date'][5:16] if len(commit['date']) >= 16 else commit['date']
+            lines.append(
+                f"| `{commit['hash']}` | {date_short} | {_escape_md_cell(commit['subject'])} |"
+            )
+        lines.append('')
+    return '\n'.join(lines).rstrip()
+
+
+def cmd_git_log(args: argparse.Namespace) -> int:
+    """扫描 git 仓库并按项目分组输出 since 之后的提交。"""
+    since = args.since
+    root = os.path.expanduser(args.root)
+    projects: list[dict[str, Any]] = []
+    for repo in _find_git_repos(root):
+        commits = _git_log_since(repo, since)
+        if not commits:
+            continue
+        projects.append({
+            'name': os.path.basename(repo.rstrip('/')) or repo,
+            'path': repo,
+            'commits': commits,
+        })
+
+    report = {
+        'since': since,
+        'root': root,
+        'project_count': len(projects),
+        'commit_count': sum(len(p['commits']) for p in projects),
+        'projects': projects,
+    }
+
+    if args.output:
+        os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
+        with open(args.output, 'w', encoding='utf-8') as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+        print(f"OK git-log: {args.output} ({report['commit_count']} commits)")
+
+    if args.markdown:
+        md = _format_git_log_markdown(projects)
+        os.makedirs(os.path.dirname(args.markdown) or '.', exist_ok=True)
+        with open(args.markdown, 'w', encoding='utf-8') as f:
+            f.write(md)
+        print(f'OK git-log markdown: {args.markdown}')
+
+    if not args.output and not args.markdown:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _load_allow_patterns() -> list[str]:
+    patterns: list[str] = []
+    for path in _SETTINGS_FILES:
+        if not os.path.exists(path):
+            continue
+        try:
+            with open(path, encoding='utf-8') as f:
+                data = json.load(f)
+        except (OSError, json.JSONDecodeError):
+            continue
+        patterns.extend((data.get('permissions') or {}).get('allow') or [])
+    return patterns
+
+
+def _git_subcommand(tokens: list[str]) -> str:
+    skip = False
+    for token in tokens[1:]:
+        if skip:
+            skip = False
+            continue
+        if token in ('-C', '-c', '--git-dir', '--work-tree'):
+            skip = True
+            continue
+        if token.startswith('-'):
+            continue
+        return token
+    return ''
+
+
+def _normalize_bash(cmd: str) -> str:
+    if not cmd:
+        return ''
+    tokens = cmd.strip().split()
+    if not tokens:
+        return ''
+    first = os.path.basename(tokens[0]) if '/' in tokens[0] else tokens[0]
+    if first == 'git':
+        sub = _git_subcommand(tokens)
+        return f'git {sub}'.strip()
+    if first in ('python3', 'python'):
+        if len(tokens) == 1:
+            return 'python3'
+        second = tokens[1]
+        if second in ('-c', '-m'):
+            return f'python3 {second}'
+        return 'python3'
+    second = tokens[1] if len(tokens) > 1 else ''
+    return f'{first} {second}'.strip()
+
+
+def _classify_auth(key: str, tool: str, allow_patterns: list[str]) -> str:
+    if tool == 'Bash':
+        for pat in allow_patterns:
+            if not pat.startswith('Bash('):
+                continue
+            inner = pat[5:-1] if pat.endswith(')') else pat[5:]
+            if inner.endswith('*'):
+                prefix = inner[:-1].strip()
+                if key.startswith(prefix):
+                    return 'allowlist'
+            elif inner == key:
+                return 'allowlist'
+        return '手动确认'
+    for pat in allow_patterns:
+        if pat == tool:
+            return 'auto-allowed'
+        if pat.startswith(f'{tool}('):
+            return 'auto-allowed'
+    return '手动确认'
+
+
+def _iter_tool_uses(path: str, container: str, since_ts: float) -> Iterator[dict[str, Any]]:
+    """遍历会话 JSONL 中的 tool_use；Claude 按 timestamp 过滤，Cursor 整文件计数。"""
+    try:
+        with open(path, encoding='utf-8') as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    obj = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                if container == 'Claude':
+                    ts = _parse_jsonl_timestamp(obj.get('timestamp'))
+                    if ts is None or ts < since_ts:
+                        continue
+                msg = obj.get('message')
+                if not isinstance(msg, dict):
+                    continue
+                content = msg.get('content')
+                if not isinstance(content, list):
+                    continue
+                for item in content:
+                    if isinstance(item, dict) and item.get('type') == 'tool_use':
+                        yield item
+    except OSError:
+        return
+
+
+def _collect_tool_stats(sessions: list[dict[str, Any]], since_ts: float) -> dict[str, Any]:
+    allow_patterns = _load_allow_patterns()
+    counts: Counter[str] = Counter()
+    claude_sessions = 0
+    cursor_sessions = 0
+
+    for session in sessions:
+        path = session.get('path') or ''
+        container = session.get('container') or ''
+        if not path or not os.path.exists(path):
+            continue
+        if container == 'Claude':
+            claude_sessions += 1
+        elif container == 'Cursor':
+            cursor_sessions += 1
+        for tool_use in _iter_tool_uses(path, container, since_ts):
+            name = tool_use.get('name') or ''
+            input_data = tool_use.get('input') or {}
+            if name == 'Bash':
+                cmd = input_data.get('command') or ''
+                key = _normalize_bash(cmd)
+            else:
+                key = name
+            if key:
+                counts[key] += 1
+
+    rows = []
+    for key, count in sorted(counts.items(), key=lambda item: (-item[1], item[0])):
+        first = key.split()[0] if key else ''
+        tool = 'Bash' if first in _BASH_FIRST_TOKENS else key
+        rows.append({
+            'command': key,
+            'count': count,
+            'auth': _classify_auth(key, tool, allow_patterns),
+        })
+
+    return {
+        'total_calls': sum(counts.values()),
+        'session_count': len(sessions),
+        'claude_sessions': claude_sessions,
+        'cursor_sessions': cursor_sessions,
+        'rows': rows,
+        'notes': [
+            'Claude 会话按 JSONL timestamp 精确过滤 tool_use。',
+            'Cursor 会话无消息级 timestamp，纳入文件的 tool_use 全部计数（近似值）。',
+        ],
+    }
+
+
+def _format_tool_stats_markdown(report: dict[str, Any]) -> str:
+    lines = [
+        '| 命令 | 次数 | 授权方式 |',
+        '|------|------|----------|',
+    ]
+    for row in report.get('rows') or []:
+        lines.append(f"| {row['command']} | {row['count']} | {row['auth']} |")
+    lines.append('')
+    lines.append(f"总计工具调用: {report.get('total_calls', 0)}")
+    for note in report.get('notes') or []:
+        lines.append(f"> {note}")
+    return '\n'.join(lines)
+
+
+def cmd_tool_stats(args: argparse.Namespace) -> int:
+    """统计时间范围内会话的工具调用次数与授权方式。"""
+    since_ts = _parse_since(args.since)
+    sessions: list[dict[str, Any]]
+    if args.inventory:
+        with open(args.inventory, encoding='utf-8') as f:
+            inventory = json.load(f)
+        sessions = inventory.get('sessions') or []
+    else:
+        sessions = _collect_session_inventory(since_ts)
+
+    report = _collect_tool_stats(sessions, since_ts)
+    report['since'] = args.since
+    report['inventory'] = args.inventory
+
+    if args.output:
+        os.makedirs(os.path.dirname(args.output) or '.', exist_ok=True)
+        with open(args.output, 'w', encoding='utf-8') as f:
+            json.dump(report, f, ensure_ascii=False, indent=2)
+        print(f"OK tool-stats: {args.output} ({report['total_calls']} calls)")
+
+    if args.markdown:
+        md = _format_tool_stats_markdown(report)
+        os.makedirs(os.path.dirname(args.markdown) or '.', exist_ok=True)
+        with open(args.markdown, 'w', encoding='utf-8') as f:
+            f.write(md)
+        print(f'OK tool-stats markdown: {args.markdown}')
+
+    if not args.output and not args.markdown:
+        print(json.dumps(report, ensure_ascii=False, indent=2))
+    return 0
+
+
+def _load_renewal_last_fired() -> float | None:
+    """从 cron-renewal.log 最近一条带 lastFiredAt 的记录读取触发时间。"""
+    if not os.path.exists(CRON_RENEWAL_LOG):
+        return None
+    last_fired: float | None = None
+    pattern = re.compile(r'lastFiredAt=([^|\s]+)')
+    try:
+        with open(CRON_RENEWAL_LOG, encoding='utf-8') as f:
+            for line in f:
+                match = pattern.search(line)
+                if not match:
+                    continue
+                raw = match.group(1).strip()
+                for fmt in ('%Y-%m-%d %H:%M', '%Y-%m-%d %H:%M:%S'):
+                    try:
+                        last_fired = datetime.strptime(raw, fmt).timestamp()
+                        break
+                    except ValueError:
+                        continue
+    except OSError:
+        return None
+    return last_fired
+
+
 def cmd_log_cron_renewal(args: argparse.Namespace) -> int:
     os.makedirs(DATA_DIR, exist_ok=True)
+    last_fired_str = args.last_fired_at
+    if not last_fired_str:
+        fired_ts = _load_cron_last_fired()
+        if fired_ts:
+            last_fired_str = datetime.fromtimestamp(fired_ts).strftime('%Y-%m-%d %H:%M')
+    fired_part = f' lastFiredAt={last_fired_str}' if last_fired_str else ''
     line = (
         f"{datetime.now().strftime('%Y-%m-%d %H:%M:%S')} | "
-        f"old={args.old} new={args.new} | note={args.note or ''}\n"
+        f"old={args.old} new={args.new}{fired_part} | note={args.note or ''}\n"
     )
     with open(CRON_RENEWAL_LOG, 'a', encoding='utf-8') as f:
         f.write(line)
@@ -529,6 +886,7 @@ def main() -> int:
     p_renewal = sub.add_parser('log-cron-renewal', help='追加 cron 续期日志')
     p_renewal.add_argument('--old', required=True)
     p_renewal.add_argument('--new', required=True)
+    p_renewal.add_argument('--last-fired-at', help='续期前 cron 的 lastFiredAt，默认自动读取')
     p_renewal.add_argument('--note', default='')
     p_renewal.set_defaults(func=cmd_log_cron_renewal)
 
@@ -541,6 +899,20 @@ def main() -> int:
     p_sessions.add_argument('--output', help='JSON 清单输出路径')
     p_sessions.add_argument('--markdown', help='Markdown 表格 stub 输出路径')
     p_sessions.set_defaults(func=cmd_list_sessions)
+
+    p_git_log = sub.add_parser('git-log', help='扫描 git 仓库并按项目分组输出提交')
+    p_git_log.add_argument('--since', required=True, help='扫描起点，如 "2026-06-24 11:50"')
+    p_git_log.add_argument('--root', default=DEFAULT_GIT_ROOT, help='git 仓库根目录')
+    p_git_log.add_argument('--output', help='JSON 输出路径')
+    p_git_log.add_argument('--markdown', help='Markdown 表格输出路径')
+    p_git_log.set_defaults(func=cmd_git_log)
+
+    p_tool_stats = sub.add_parser('tool-stats', help='统计会话工具调用次数与授权方式')
+    p_tool_stats.add_argument('--since', required=True, help='扫描起点，如 "2026-06-24 11:50"')
+    p_tool_stats.add_argument('--inventory', help='list-sessions 输出的 JSON 路径')
+    p_tool_stats.add_argument('--output', help='JSON 输出路径')
+    p_tool_stats.add_argument('--markdown', help='Markdown 表格输出路径')
+    p_tool_stats.set_defaults(func=cmd_tool_stats)
 
     args = parser.parse_args()
     return args.func(args)
