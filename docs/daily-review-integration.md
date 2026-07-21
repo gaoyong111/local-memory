@@ -57,8 +57,9 @@
 | Ollama | `curl localhost:11434/api/tags` | 跳过依赖 embedding 的步骤 |
 | local-memory MCP | `search_memory` / `get_all_memories` | 跳过在线写入 |
 | pending 队列 | `ls pending/*.json` | 仅记录条数 |
+| 权限漂移 | `sync_permissions.py --check` | drift 时执行 sync 修复并在「配置变更记录」标注 |
 
-**降级模式**：Ollama 或 MCP 不可用时，仍从 git / 会话产出复盘文档；跳过 pending 重试、记忆提取、升格、grooming；在文档中记录告警。
+**降级模式**：Ollama 或 MCP 不可用时，仍从 git / 会话产出复盘文档；跳过 pending 重试、记忆提取、升格、grooming；在文档中记录告警并给出修复命令。会话中途基础设施恢复时补跑被跳过环节（进化提取 → diff → 升格 → grooming），而非整篇放弃。
 
 保证核心复盘任务不因基础设施故障完全中断。
 
@@ -140,7 +141,7 @@ run_episodic_grooming(dry_run=false)
 | `git-log` | 扫描 `~/Desktop/h5_release/` git 提交 |
 | `tool-stats` | 工具调用次数与授权方式 |
 | `diff` / `snapshot` | local-memory 快照与对比（diff 在进化提取**之后**） |
-| `record-scan-end` | 写入下次扫描起点（cron lastFiredAt，续期后 fallback renewal log） |
+| `record-scan-end` | 写入下次扫描起点（fallback 链：cron lastFiredAt → renewal log → 现有文件原值 → now；终点只前进不后退） |
 | `log-cron-renewal` | cron 续期日志（含 lastFiredAt） |
 
 启用 skill 辅助（**会覆盖**目标路径已有文件）：

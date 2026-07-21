@@ -448,9 +448,17 @@ def cmd_record_scan_end(args: argparse.Namespace) -> int:
 
     默认写 cron lastFiredAt（复盘可能拖到下午才写完，仍以触发时刻为边界）。
     --manual：手动复盘，写 now。
-    无 lastFiredAt 时 fallback 到 cron-renewal.log 记录的 lastFiredAt，再 fallback 到 now。
+    fallback 链：cron lastFiredAt → cron-renewal.log → 现有 last-scan-end.txt → now。
+    终点只允许前进：候选值早于现有文件值时保留原值（防同日复跑互相覆盖）。
     """
     os.makedirs(DATA_DIR, exist_ok=True)
+    existing_ts = None
+    if os.path.exists(LAST_SCAN_END_FILE):
+        try:
+            with open(LAST_SCAN_END_FILE, encoding='utf-8') as f:
+                existing_ts = _parse_since(f.read().strip())
+        except ValueError:
+            existing_ts = None
     if args.manual:
         end_ts = datetime.now().timestamp()
         src = 'now_manual'
@@ -464,9 +472,15 @@ def cmd_record_scan_end(args: argparse.Namespace) -> int:
             if renewal_fired:
                 end_ts = renewal_fired
                 src = 'renewal_log_lastFiredAt'
+            elif existing_ts:
+                end_ts = existing_ts
+                src = 'existing_file_keep'
             else:
                 end_ts = datetime.now().timestamp()
                 src = 'now_fallback'
+    if existing_ts and end_ts < existing_ts:
+        end_ts = existing_ts
+        src += '_clamped_to_existing'
     end_str = datetime.fromtimestamp(end_ts).strftime('%Y-%m-%d %H:%M')
     with open(LAST_SCAN_END_FILE, 'w', encoding='utf-8') as f:
         f.write(end_str)
