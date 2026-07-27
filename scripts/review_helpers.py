@@ -11,7 +11,7 @@ import sqlite3
 import subprocess
 import sys
 from collections import Counter
-from datetime import datetime
+from datetime import date, datetime, timedelta
 from typing import Any, Iterator
 
 MEMORY_DIR = os.path.expanduser(os.getenv('MEMORY_DIR', '~/.memory'))
@@ -34,7 +34,10 @@ def _resolve_history_db() -> str:
 HISTORY_DB = _resolve_history_db()
 CRON_RENEWAL_LOG = os.path.join(REVIEW_DIR, 'cron-renewal.log')
 LAST_SCAN_END_FILE = os.path.join(DATA_DIR, 'last-scan-end.txt')
-MISSED_RUN_HOURS = 36
+RENEWAL_BASE_DAYS = 3
+MISSED_RUN_GRACE_HOURS = 2
+EXPECTED_RUN_HOUR = 9
+HOLIDAYS_FILE = os.path.join(REVIEW_DIR, 'holidays.yaml')
 DEFAULT_GIT_ROOT = os.path.expanduser('~/Desktop/h5_release')
 _SETTINGS_FILES = (
     os.path.expanduser('~/.claude/settings.json'),
@@ -392,6 +395,90 @@ def cmd_diff(args: argparse.Namespace) -> int:
     return 0
 
 
+def _load_holidays() -> set[date]:
+    """读 holidays.yaml（手动维护的法定节假日清单），解析 '- YYYY-MM-DD' 行。"""
+    holidays: set[date] = set()
+    if not os.path.exists(HOLIDAYS_FILE):
+        return holidays
+    pattern = re.compile(r'^\s*-\s*(\d{4}-\d{2}-\d{2})\s*$')
+    try:
+        with open(HOLIDAYS_FILE, encoding='utf-8') as f:
+            for line in f:
+                match = pattern.match(line)
+                if match:
+                    try:
+                        holidays.add(datetime.strptime(match.group(1), '%Y-%m-%d').date())
+                    except ValueError:
+                        continue
+    except OSError:
+        pass
+    return holidays
+
+
+def _is_workday(d: date, holidays: set[date]) -> bool:
+    """周末或法定节假日为非工作日；调休工作日不处理（阈值略延长，方向安全）。"""
+    return d.weekday() < 5 and d not in holidays
+
+
+def _non_workdays_between(start: date, end: date, holidays: set[date]) -> int:
+    """(start, end] 区间内的非工作日天数。"""
+    count = 0
+    d = start + timedelta(days=1)
+    while d <= end:
+        if not _is_workday(d, holidays):
+            count += 1
+        d += timedelta(days=1)
+    return count
+
+
+def _load_review_cron_task() -> dict[str, Any] | None:
+    """读 scheduled_tasks.json 中的复盘 cron 任务对象。"""
+    path = os.path.expanduser('~/.claude/scheduled_tasks.json')
+    if not os.path.exists(path):
+        return None
+    try:
+        with open(path) as f:
+            cfg = json.load(f)
+    except Exception:
+        return None
+    tasks = [
+        t for t in (cfg.get('tasks') or [])
+        if 'daily-review/SKILL.md' in (t.get('prompt') or '')
+    ]
+    return tasks[0] if tasks else None
+
+
+def cmd_renewal_due(args: argparse.Namespace) -> int:
+    """判断 cron 是否到期该续期：阈值 = 3 天 + 区间内周末/节假日天数。
+
+    周末与法定节假日用户可能不在线，不计入续期年龄（例：跨周末阈值 5 天，
+    跨国庆 7 天阈值 10 天）。复盘时调用，due=true 才执行续期。
+    """
+    task = _load_review_cron_task()
+    if not task or not task.get('createdAt'):
+        print(json.dumps({'due': False, 'reason': 'no review cron found'}, ensure_ascii=False))
+        return 0
+    created_ts = task['createdAt'] / 1000.0
+    created_date = datetime.fromtimestamp(created_ts).date()
+    today = datetime.now().date()
+    holidays = _load_holidays()
+    age_days = (today - created_date).days
+    non_workdays = _non_workdays_between(created_date, today, holidays)
+    threshold = RENEWAL_BASE_DAYS + non_workdays
+    result = {
+        'due': age_days >= threshold,
+        'age_days': age_days,
+        'threshold_days': threshold,
+        'base_days': RENEWAL_BASE_DAYS,
+        'non_workdays': non_workdays,
+        'created_at': datetime.fromtimestamp(created_ts).strftime('%Y-%m-%d %H:%M'),
+        'cron_id': task.get('id'),
+        'holidays_loaded': len(holidays),
+    }
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    return 0
+
+
 def find_latest_review() -> tuple[str, float] | None:
     paths = sorted(glob.glob(os.path.join(REVIEW_DIR, 'daily-review-*.md')))
     if not paths:
@@ -429,14 +516,32 @@ def cmd_check_missed_run(args: argparse.Namespace) -> int:
         scan_start_source = 'file_mtime_fallback'
 
     hours = (datetime.now().timestamp() - scan_start_ts) / 3600
-    missed = hours > MISSED_RUN_HOURS
+    # 工作日化漏跑检测：每个工作日 09:00 期望一次复盘；
+    # (scan_start, now - grace] 内存在期望运行时刻即漏跑。
+    # grace 内的期望时刻视为「当前正在执行的本轮」，周末/节假日不产生期望。
+    holidays = _load_holidays()
+    now_ts = datetime.now().timestamp()
+    grace_cutoff = now_ts - MISSED_RUN_GRACE_HOURS * 3600
+    expected_missed: list[str] = []
+    d = datetime.fromtimestamp(scan_start_ts).date()
+    today = datetime.now().date()
+    while d <= today:
+        if _is_workday(d, holidays):
+            expected_ts = datetime(d.year, d.month, d.day, EXPECTED_RUN_HOUR).timestamp()
+            if scan_start_ts < expected_ts <= grace_cutoff:
+                expected_missed.append(
+                    datetime.fromtimestamp(expected_ts).strftime('%Y-%m-%d %H:%M')
+                )
+        d += timedelta(days=1)
+    missed = len(expected_missed) > 0
     result = {
         'missed': missed,
         'scan_start': scan_start_str,
         'scan_start_source': scan_start_source,
         'latest_review': latest[0] if latest else None,
         'hours_since_scan_start': round(hours, 1),
-        'threshold_hours': MISSED_RUN_HOURS,
+        'detection': 'workday-based（周末/节假日不产生期望，grace=%dh）' % MISSED_RUN_GRACE_HOURS,
+        'expected_missed_runs': expected_missed,
         'banner': '⚠️ 疑似漏跑，覆盖范围可能跨天' if missed else '',
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
@@ -894,8 +999,11 @@ def main() -> int:
     p_diff.add_argument('--output', help='diff 报告输出路径')
     p_diff.set_defaults(func=cmd_diff)
 
-    p_missed = sub.add_parser('check-missed-run', help='检测是否漏跑复盘')
+    p_missed = sub.add_parser('check-missed-run', help='检测是否漏跑复盘（工作日化）')
     p_missed.set_defaults(func=cmd_check_missed_run)
+
+    p_renewal_due = sub.add_parser('renewal-due', help='判断 cron 是否到期续期（周末/节假日不计龄）')
+    p_renewal_due.set_defaults(func=cmd_renewal_due)
 
     p_renewal = sub.add_parser('log-cron-renewal', help='追加 cron 续期日志')
     p_renewal.add_argument('--old', required=True)

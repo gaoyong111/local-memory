@@ -136,7 +136,8 @@ run_episodic_grooming(dry_run=false)
 
 | 子命令 | 用途 |
 |--------|------|
-| `check-missed-run` | 漏跑检测 + 返回扫描起点 |
+| `check-missed-run` | 漏跑检测（工作日化：工作日 09:00 期望一次复盘，周末/节假日不产生期望）+ 返回扫描起点 |
+| `renewal-due` | cron 续期到期判断（阈值 = 3 天 + 区间内周末/节假日天数，节假日读 `~/daily-reviews/holidays.yaml`，每年初手动更新） |
 | `list-sessions` | Claude/Cursor 会话清单 |
 | `git-log` | 扫描 `~/Desktop/h5_release/` git 提交 |
 | `tool-stats` | 工具调用次数与授权方式 |
