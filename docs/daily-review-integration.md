@@ -142,7 +142,7 @@ run_episodic_grooming(dry_run=false)
 | `git-log` | 扫描 `~/Desktop/h5_release/` git 提交 |
 | `tool-stats` | 工具调用次数与授权方式 |
 | `diff` / `snapshot` | local-memory 快照与对比（diff 在进化提取**之后**） |
-| `record-scan-end` | 写入下次扫描起点（fallback 链：cron lastFiredAt → renewal log → 现有文件原值 → now；终点只前进不后退） |
+| `record-scan-end` | 写入下次扫描起点（2026-07-30 起写复盘结束时刻 now，上次执行窗口不重扫；终点只前进不后退） |
 | `log-cron-renewal` | cron 续期日志（含 lastFiredAt） |
 
 启用 skill 辅助（**会覆盖**目标路径已有文件）：

@@ -491,7 +491,7 @@ def cmd_check_missed_run(args: argparse.Namespace) -> int:
     """检测漏跑 + 返回下次扫描起点。
 
     scan_start 优先级：
-    1. .data/last-scan-end.txt（上次复盘结束时记录的 lastFiredAt）
+    1. .data/last-scan-end.txt（上次复盘结束时刻，2026-07-30 起由 record-scan-end 写 now）
     2. 最新复盘文件 mtime（fallback）
     """
     scan_start_str = None
@@ -549,12 +549,11 @@ def cmd_check_missed_run(args: argparse.Namespace) -> int:
 
 
 def cmd_record_scan_end(args: argparse.Namespace) -> int:
-    """本次复盘结束时调用：把扫描边界写入 .data/last-scan-end.txt。
+    """本次复盘结束时调用：把复盘结束时刻写入 .data/last-scan-end.txt。
 
-    默认写 cron lastFiredAt（复盘可能拖到下午才写完，仍以触发时刻为边界）。
-    --manual：手动复盘，写 now。
-    fallback 链：cron lastFiredAt → cron-renewal.log → 现有 last-scan-end.txt → now。
-    终点只允许前进：候选值早于现有文件值时保留原值（防同日复跑互相覆盖）。
+    2026-07-30 起写 now（用户决策：上次复盘执行窗口内基本只有复盘会话自身，
+    重扫浪费 token，不再用 cron lastFiredAt 做边界）。
+    终点只允许前进：now 早于现有文件值时保留原值（防时钟异常）。
     """
     os.makedirs(DATA_DIR, exist_ok=True)
     existing_ts = None
@@ -564,25 +563,8 @@ def cmd_record_scan_end(args: argparse.Namespace) -> int:
                 existing_ts = _parse_since(f.read().strip())
         except ValueError:
             existing_ts = None
-    if args.manual:
-        end_ts = datetime.now().timestamp()
-        src = 'now_manual'
-    else:
-        cron_fired = _load_cron_last_fired()
-        if cron_fired:
-            end_ts = cron_fired
-            src = 'cron_lastFiredAt'
-        else:
-            renewal_fired = _load_renewal_last_fired()
-            if renewal_fired:
-                end_ts = renewal_fired
-                src = 'renewal_log_lastFiredAt'
-            elif existing_ts:
-                end_ts = existing_ts
-                src = 'existing_file_keep'
-            else:
-                end_ts = datetime.now().timestamp()
-                src = 'now_fallback'
+    end_ts = datetime.now().timestamp()
+    src = 'now'
     if existing_ts and end_ts < existing_ts:
         end_ts = existing_ts
         src += '_clamped_to_existing'
