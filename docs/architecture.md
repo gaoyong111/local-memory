@@ -203,14 +203,16 @@ MCP 已运行时优先 `run_episodic_grooming`（避免 Chroma 多进程冲突�
 ```json
 {
   "embedder": { "provider": "ollama", "model": "bge-m3", "base_url": "..." },
-  "llm": { "provider": "openai_compatible", "model": "...", "api_key_env": "..." },
+  "llm": { "provider": "anthropic", "auto_follow": true, "model": "...", "base_url": "..." },
   "fallback_llm": { "provider": "ollama", "model": "qwen2.5:7b", "base_url": "..." }
 }
 ```
 
 - **嵌入**：始终本地 Ollama bge-m3（中文效果好、无 API 费用）
 - **LLM**：仅用于 E 策略去重与 episodic grooming
-- 主 LLM 失败 → 自动切 `fallback_llm`
+- **auto_follow**：`llm` 块设 `auto_follow=true` 时，读 `~/.claude/settings.json` 的 env（cc-switch 切换供应商时写入），用当前 Claude 会话的在线模型覆盖 endpoint/model/token，模型切换即时生效；settings 读不到或三键（base_url/model/token）不全时回落块内静态字段
+- 主 LLM 失败 → 自动切 `fallback_llm`（本地 qwen2.5:7b，慢/发热）
+- **降级告警**：主 LLM 失败且 fallback 成功时，每进程每主端点写一条 pending 告警记忆（`source=llm-degradation-alert`），每日复盘可见——降级不再静默
 
 MCP 启动探活 LLM；失败仅 warning —— 关键词检索仍可用。
 

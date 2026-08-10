@@ -51,6 +51,7 @@ Edit the pool config copied by setup, or replace it:
 cp configs/config_ollama.example.json ~/.memory/pools/default/config.json
 # Remote LLM: configs/config_api.example.json (embedder still requires local Ollama)
 #   echo 'NEWAPI_KEY=your-key' >> ~/.memory/pools/default/.env
+#   llm block supports auto_follow=true: follows the current Claude session's online model, effective on cc-switch
 ollama pull bge-m3   # required for search with either config
 ```
 

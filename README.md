@@ -53,6 +53,7 @@ bash scripts/setup.sh
 cp configs/config_ollama.example.json ~/.memory/pools/default/config.json
 # 远程 LLM：configs/config_api.example.json（embedder 仍须本地 Ollama）
 #   echo 'NEWAPI_KEY=your-key' >> ~/.memory/pools/default/.env
+#   llm 块支持 auto_follow=true：跟随当前 Claude 会话在线模型，cc-switch 切换即时生效
 ollama pull bge-m3   # 全本地或 config_api 均需 bge-m3 做向量检索
 ```
 
