@@ -6,6 +6,7 @@ import json
 import logging
 import os
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
@@ -83,6 +84,38 @@ def _apply_auto_follow(block: dict[str, Any]) -> dict[str, Any]:
     resolved.pop('api_key_env', None)
     resolved.pop('api_key_env_name', None)
     return resolved
+
+
+_degradation_recorded: set[str] = set()
+
+
+def _record_degradation(primary_url: str, fallback_url: str, error: Exception) -> None:
+    """主 LLM 降级时写一条 pending 记忆，供每日复盘可见；每进程每主端点仅记一次。"""
+    key = primary_url or 'primary'
+    if key in _degradation_recorded:
+        return
+    _degradation_recorded.add(key)
+    try:
+        pending_dir = resolve_pool_path() / 'pending'
+        pending_dir.mkdir(parents=True, exist_ok=True)
+        payload = {
+            'content': (
+                f'local-memory 主 LLM 降级：primary={primary_url or "(空)"} 不可达，'
+                f'fallback 到 {fallback_url or "(空)"}'
+                f'（{type(error).__name__}: {str(error)[:120]}）。'
+                '当天推理走降级链路可能变慢/发烫。'
+            ),
+            'metadata': {'category': 'episodic', 'project': 'local-memory'},
+            'project': 'local-memory',
+            'use_infer': False,
+            'retry_count': 0,
+            'created_at': datetime.now().isoformat(),
+            'source': 'llm-degradation-alert',
+        }
+        filename = f"llm-degraded-{datetime.now().strftime('%Y%m%d-%H%M%S%f')}.json"
+        (pending_dir / filename).write_text(json.dumps(payload, ensure_ascii=False, indent=2), encoding='utf-8')
+    except Exception:
+        logger.exception('记录 LLM 降级失败')
 
 
 def _resolve_llm_configs() -> tuple[dict[str, Any], dict[str, Any] | None]:
@@ -235,12 +268,18 @@ class LlmClient:
         json_mode = (response_format or {}).get('type') == 'json_object'
         last_error: Exception | None = None
         primary, fallback = _resolve_llm_configs()
-        for label, block in [('primary', primary), ('fallback', fallback)]:
+        for idx, (label, block) in enumerate([('primary', primary), ('fallback', fallback)]):
             if not block:
                 continue
             try:
                 result = _generate_with_block(block, messages, json_mode=json_mode)
                 if result.strip():
+                    if last_error is not None and idx > 0:
+                        _record_degradation(
+                            primary.get('base_url', '') if primary else '',
+                            block.get('base_url', ''),
+                            last_error,
+                        )
                     return result
             except Exception as exc:
                 last_error = exc

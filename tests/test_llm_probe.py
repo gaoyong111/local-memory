@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 import sys
 import unittest
@@ -10,7 +11,14 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
-from llm_client import _apply_auto_follow, _llm_endpoint_url, _resolve_llm_configs, probe_llm_reachable  # noqa: E402
+from llm_client import (  # noqa: E402
+    _apply_auto_follow,
+    _llm_endpoint_url,
+    _record_degradation,
+    _resolve_llm_configs,
+    LlmClient,
+    probe_llm_reachable,
+)
 
 
 class LlmEndpointUrlTests(unittest.TestCase):
@@ -110,6 +118,74 @@ class AutoFollowTests(unittest.TestCase):
         self.assertEqual(primary.get('base_url'), 'http://192.168.2.252:7080')
         self.assertEqual(primary.get('model'), 'deepseek-v4-flash')
         self.assertEqual(fallback.get('base_url'), 'http://localhost:11434')
+
+
+class DegradationRecordTests(unittest.TestCase):
+    @mock.patch('llm_client._record_degradation')
+    @mock.patch('llm_client._resolve_llm_configs')
+    @mock.patch('llm_client._generate_with_block')
+    def test_primary_fail_fallback_ok_records(self, mock_gen, mock_resolve, mock_record) -> None:
+        mock_resolve.return_value = (
+            {'provider': 'anthropic', 'base_url': 'http://primary'},
+            {'provider': 'ollama', 'base_url': 'http://localhost:11434'},
+        )
+        mock_gen.side_effect = [Exception('primary down'), 'fallback result']
+
+        result = LlmClient().generate_response([{'role': 'user', 'content': 'hi'}])
+
+        self.assertEqual(result, 'fallback result')
+        mock_record.assert_called_once()
+
+    @mock.patch('llm_client._record_degradation')
+    @mock.patch('llm_client._resolve_llm_configs')
+    @mock.patch('llm_client._generate_with_block')
+    def test_primary_ok_no_record(self, mock_gen, mock_resolve, mock_record) -> None:
+        mock_resolve.return_value = (
+            {'provider': 'anthropic', 'base_url': 'http://primary'},
+            {'provider': 'ollama', 'base_url': 'http://localhost:11434'},
+        )
+        mock_gen.side_effect = ['primary result']
+
+        result = LlmClient().generate_response([{'role': 'user', 'content': 'hi'}])
+
+        self.assertEqual(result, 'primary result')
+        mock_record.assert_not_called()
+
+    @mock.patch('llm_client.resolve_pool_path')
+    @mock.patch('llm_client._degradation_recorded', new_callable=lambda: set())
+    def test_record_writes_pending_json(self, _mock_set, mock_resolve) -> None:
+        from pathlib import Path
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pool = Path(tmp)
+            (pool / 'pending').mkdir()
+            mock_resolve.return_value = pool
+
+            _record_degradation('http://primary', 'http://localhost:11434', RuntimeError('boom'))
+
+            files = list((pool / 'pending').glob('llm-degraded-*.json'))
+            self.assertEqual(len(files), 1)
+            payload = json.loads(files[0].read_text(encoding='utf-8'))
+            self.assertEqual(payload['source'], 'llm-degradation-alert')
+            self.assertIn('http://primary', payload['content'])
+
+    @mock.patch('llm_client.resolve_pool_path')
+    @mock.patch('llm_client._degradation_recorded', new_callable=lambda: set())
+    def test_record_throttled_per_process(self, mock_set, mock_resolve) -> None:
+        from pathlib import Path
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            pool = Path(tmp)
+            (pool / 'pending').mkdir()
+            mock_resolve.return_value = pool
+
+            _record_degradation('http://primary', 'http://f1', RuntimeError('boom'))
+            _record_degradation('http://primary', 'http://f2', RuntimeError('boom again'))
+
+            files = list((pool / 'pending').glob('llm-degraded-*.json'))
+            self.assertEqual(len(files), 1)
 
 
 class ProbeLlmReachableTests(unittest.TestCase):
