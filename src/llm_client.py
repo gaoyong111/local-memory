@@ -50,9 +50,46 @@ def _flatten_llm_block(block: dict[str, Any]) -> dict[str, Any]:
     return dict(block)
 
 
+_SESSION_SETTINGS_PATH = '~/.claude/settings.json'
+
+
+def _read_session_llm_env() -> dict[str, str]:
+    """读 cc-switch 写入 ~/.claude/settings.json 的 env，取当前会话在线模型三元组。"""
+    path = Path(_SESSION_SETTINGS_PATH).expanduser()
+    try:
+        with open(path, encoding='utf-8') as handle:
+            data = json.load(handle)
+    except (OSError, ValueError):
+        return {}
+    env = data.get('env') or {}
+    keys = ('ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL', 'ANTHROPIC_AUTH_TOKEN')
+    values = [env.get(k) for k in keys]
+    if not all(values):
+        return {}
+    return dict(zip(keys, values))
+
+
+def _apply_auto_follow(block: dict[str, Any]) -> dict[str, Any]:
+    """auto_follow=true 时用当前 Claude 会话的在线模型覆盖 endpoint/model/token。"""
+    resolved = dict(block)
+    env = _read_session_llm_env()
+    required = ('ANTHROPIC_BASE_URL', 'ANTHROPIC_MODEL', 'ANTHROPIC_AUTH_TOKEN')
+    if not env or not all(env.get(k) for k in required):
+        return resolved
+    resolved['provider'] = 'anthropic'
+    resolved['base_url'] = env['ANTHROPIC_BASE_URL']
+    resolved['model'] = env['ANTHROPIC_MODEL']
+    resolved['api_key'] = env['ANTHROPIC_AUTH_TOKEN']
+    resolved.pop('api_key_env', None)
+    resolved.pop('api_key_env_name', None)
+    return resolved
+
+
 def _resolve_llm_configs() -> tuple[dict[str, Any], dict[str, Any] | None]:
     config = _read_config()
     primary = _flatten_llm_block(config.get('llm') or {})
+    if primary.get('auto_follow'):
+        primary = _apply_auto_follow(primary)
     fallback_raw = config.get('fallback_llm')
     fallback = _flatten_llm_block(fallback_raw) if fallback_raw else None
 
@@ -197,7 +234,8 @@ class LlmClient:
     ) -> str:
         json_mode = (response_format or {}).get('type') == 'json_object'
         last_error: Exception | None = None
-        for label, block in [('primary', self._primary), ('fallback', self._fallback)]:
+        primary, fallback = _resolve_llm_configs()
+        for label, block in [('primary', primary), ('fallback', fallback)]:
             if not block:
                 continue
             try:

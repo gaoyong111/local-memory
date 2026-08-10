@@ -10,7 +10,7 @@ from unittest import mock
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'src'))
 
-from llm_client import _llm_endpoint_url, _resolve_llm_configs, probe_llm_reachable  # noqa: E402
+from llm_client import _apply_auto_follow, _llm_endpoint_url, _resolve_llm_configs, probe_llm_reachable  # noqa: E402
 
 
 class LlmEndpointUrlTests(unittest.TestCase):
@@ -43,6 +43,73 @@ class ResolveLlmConfigsTests(unittest.TestCase):
         self.assertEqual(primary.get('base_url'), 'http://primary')
         self.assertEqual(fallback.get('base_url'), 'http://fallback-ollama')
         mock_path_cls.return_value.expanduser.assert_called_once()
+
+
+class AutoFollowTests(unittest.TestCase):
+    @mock.patch('llm_client._read_session_llm_env')
+    def test_auto_follow_overrides_session_model(self, mock_env) -> None:
+        mock_env.return_value = {
+            'ANTHROPIC_BASE_URL': 'http://192.168.2.252:7080',
+            'ANTHROPIC_MODEL': 'deepseek-v4-flash',
+            'ANTHROPIC_AUTH_TOKEN': 'sk-test',
+        }
+        block = {
+            'provider': 'anthropic',
+            'auto_follow': True,
+            'model': 'stale',
+            'base_url': 'http://192.168.2.252:6200',
+            'api_key_env': 'NEWAPI_KEY',
+            'temperature': 0.1,
+        }
+
+        resolved = _apply_auto_follow(block)
+
+        self.assertEqual(resolved['provider'], 'anthropic')
+        self.assertEqual(resolved['base_url'], 'http://192.168.2.252:7080')
+        self.assertEqual(resolved['model'], 'deepseek-v4-flash')
+        self.assertEqual(resolved['api_key'], 'sk-test')
+        self.assertNotIn('api_key_env', resolved)
+
+    @mock.patch('llm_client._read_session_llm_env')
+    def test_auto_follow_env_missing_keeps_static(self, mock_env) -> None:
+        mock_env.return_value = {}
+        block = {'provider': 'anthropic', 'auto_follow': True, 'base_url': 'http://static'}
+
+        resolved = _apply_auto_follow(block)
+
+        self.assertEqual(resolved['base_url'], 'http://static')
+
+    @mock.patch('llm_client._read_session_llm_env')
+    def test_auto_follow_partial_env_falls_back(self, mock_env) -> None:
+        mock_env.return_value = {
+            'ANTHROPIC_BASE_URL': 'http://192.168.2.252:7080',
+            'ANTHROPIC_MODEL': 'deepseek-v4-flash',
+        }
+        block = {'provider': 'anthropic', 'auto_follow': True, 'base_url': 'http://static', 'api_key': 'static-key'}
+
+        resolved = _apply_auto_follow(block)
+
+        self.assertEqual(resolved['base_url'], 'http://static')
+        self.assertEqual(resolved['api_key'], 'static-key')
+
+    @mock.patch('llm_client._read_session_llm_env')
+    @mock.patch('llm_client._read_config')
+    def test_resolve_auto_follow_from_config(self, mock_read, mock_env) -> None:
+        mock_env.return_value = {
+            'ANTHROPIC_BASE_URL': 'http://192.168.2.252:7080',
+            'ANTHROPIC_MODEL': 'deepseek-v4-flash',
+            'ANTHROPIC_AUTH_TOKEN': 'sk-test',
+        }
+        mock_read.return_value = {
+            'llm': {'provider': 'anthropic', 'auto_follow': True, 'base_url': 'http://stale'},
+            'fallback_llm': {'provider': 'ollama', 'base_url': 'http://localhost:11434'},
+        }
+
+        primary, fallback = _resolve_llm_configs()
+
+        self.assertEqual(primary.get('base_url'), 'http://192.168.2.252:7080')
+        self.assertEqual(primary.get('model'), 'deepseek-v4-flash')
+        self.assertEqual(fallback.get('base_url'), 'http://localhost:11434')
 
 
 class ProbeLlmReachableTests(unittest.TestCase):

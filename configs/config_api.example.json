@@ -6,6 +6,7 @@
   },
   "llm": {
     "provider": "openai_compatible",
+    "auto_follow": true,
     "model": "glm-5.1",
     "base_url": "https://your-api.example/v1",
     "api_key_env": "NEWAPI_KEY",
