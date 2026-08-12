@@ -90,7 +90,7 @@ _degradation_recorded: set[str] = set()
 
 
 def _record_degradation(primary_url: str, fallback_url: str, error: Exception) -> None:
-    """主 LLM 降级时写一条 pending 记忆，供每日复盘可见；每进程每主端点仅记一次。"""
+    """主 LLM 不可用/降级时写一条 pending 记忆，供每日复盘可见；每进程每主端点仅记一次。"""
     key = primary_url or 'primary'
     if key in _degradation_recorded:
         return
@@ -100,10 +100,10 @@ def _record_degradation(primary_url: str, fallback_url: str, error: Exception) -
         pending_dir.mkdir(parents=True, exist_ok=True)
         payload = {
             'content': (
-                f'local-memory 主 LLM 降级：primary={primary_url or "(空)"} 不可达，'
-                f'fallback 到 {fallback_url or "(空)"}'
+                f'local-memory 主 LLM 不可用：primary={primary_url or "(空)"}'
                 f'（{type(error).__name__}: {str(error)[:120]}）。'
-                '当天推理走降级链路可能变慢/发烫。'
+                '本地 qwen 降级已移除，涉及 LLM 的调用（grooming/add_policy）将失败或走规则兜底，'
+                '请检查主端点可达性或 auto_follow 配置。'
             ),
             'metadata': {'category': 'episodic', 'project': 'local-memory'},
             'project': 'local-memory',
@@ -265,6 +265,7 @@ class LlmClient:
         messages: list[dict[str, str]],
         response_format: dict[str, str] | None = None,
     ) -> str:
+        """主端点失败即写降级告警并抛错，不再静默降级本地 qwen（兜底已移除）。"""
         json_mode = (response_format or {}).get('type') == 'json_object'
         last_error: Exception | None = None
         primary, fallback = _resolve_llm_configs()
@@ -284,7 +285,12 @@ class LlmClient:
             except Exception as exc:
                 last_error = exc
                 logger.warning('llm %s failed: %s', label, exc)
-        if last_error:
+        if last_error is not None:
+            _record_degradation(
+                primary.get('base_url', '') if primary else '',
+                fallback.get('base_url', '') if fallback else '',
+                last_error,
+            )
             raise last_error
         raise RuntimeError('LLM 主配置和兜底配置均不可用')
 

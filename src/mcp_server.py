@@ -205,12 +205,17 @@ def retry_pending() -> str:
 
     success_count = 0
     fail_count = 0
+    alert_count = 0
     manual_review: list[str] = []
 
     for filename in files:
         filepath = os.path.join(pdir, filename)
         with open(filepath, encoding='utf-8') as handle:
             payload = json.load(handle)
+
+        if payload.get('source') == 'llm-degradation-alert':
+            alert_count += 1
+            continue
 
         payload['retry_count'] = int(payload.get('retry_count', 0) or 0) + 1
         payload.pop('use_infer', None)
@@ -233,6 +238,8 @@ def retry_pending() -> str:
                 fail_count += 1
 
     lines = [f'重试完成: 成功{success_count}条, 失败{fail_count}条']
+    if alert_count:
+        lines.append(f'降级告警 {alert_count} 条（llm-degraded-*，不入库，供复盘读取）')
     if manual_review:
         lines.append(f'需人工介入: {manual_review}')
 

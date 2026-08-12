@@ -173,11 +173,6 @@ v2 扁平 config：
     "model": "glm-5.1",
     "base_url": "https://your-api.example/v1",
     "api_key_env": "NEWAPI_KEY"
-  },
-  "fallback_llm": {
-    "provider": "ollama",
-    "model": "qwen2.5:7b",
-    "base_url": "http://localhost:11434"
   }
 }
 ```

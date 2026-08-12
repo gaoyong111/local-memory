@@ -151,6 +151,21 @@ class DegradationRecordTests(unittest.TestCase):
         self.assertEqual(result, 'primary result')
         mock_record.assert_not_called()
 
+    @mock.patch('llm_client._record_degradation')
+    @mock.patch('llm_client._resolve_llm_configs')
+    @mock.patch('llm_client._generate_with_block')
+    def test_primary_fail_no_fallback_records_and_raises(self, mock_gen, mock_resolve, mock_record) -> None:
+        mock_resolve.return_value = (
+            {'provider': 'anthropic', 'base_url': 'http://primary'},
+            None,
+        )
+        mock_gen.side_effect = [Exception('primary down')]
+
+        with self.assertRaisesRegex(Exception, 'primary down'):
+            LlmClient().generate_response([{'role': 'user', 'content': 'hi'}])
+
+        mock_record.assert_called_once()
+
     @mock.patch('llm_client.resolve_pool_path')
     @mock.patch('llm_client._degradation_recorded', new_callable=lambda: set())
     def test_record_writes_pending_json(self, _mock_set, mock_resolve) -> None:

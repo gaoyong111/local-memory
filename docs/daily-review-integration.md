@@ -113,6 +113,8 @@ run_episodic_grooming(dry_run=false)
 
 人在 mem_viewer 或对话中 `confirm_grooming` 确认。
 
+**失败处理**：LLM 主端点不可用 / Chroma 异常 / MCP 中断时**直接跳过，不硬跑**；复盘主体结束后 AI 重试一次，仍失败则告知用户。跳过原因记入复盘文档（「基础设施告警」或 grooming 小节）；主 LLM 降级告警记忆 `source=llm-degradation-alert` 会写入 pending 供复盘可见（本地 qwen 降级已移除，2026-08-11）。
+
 ---
 
 ## 会话采集注意
