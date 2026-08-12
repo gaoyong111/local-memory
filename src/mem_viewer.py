@@ -707,6 +707,26 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
   #detail-panel-body::-webkit-scrollbar-thumb { background:#0f3460; border-radius:3px; }
   #detail-panel-footer { flex-shrink:0; padding:12px 16px 16px; border-top:1px solid #0f3460; background:#16213e; }
 
+  #memory-list { width:240px; background:#16213e; border-left:1px solid #0f3460; overflow-y:auto; display:flex; flex-direction:column; min-height:0; scrollbar-width:thin; scrollbar-color:#0f3460 transparent; }
+  #memory-list.collapsed { width:38px; overflow:hidden; }
+  #memory-list::-webkit-scrollbar { width:6px; }
+  #memory-list::-webkit-scrollbar-thumb { background:#0f3460; border-radius:3px; }
+  .memory-list-head { display:flex; align-items:center; gap:6px; padding:12px 12px 10px; font-size:12px; color:#7f8c8d; border-bottom:1px solid #0f3460; flex-shrink:0; cursor:pointer; user-select:none; }
+  .memory-list-head:hover { background:#1a1a2e; }
+  #memory-list.collapsed .memory-list-head { justify-content:center; padding:12px 0; }
+  #memory-list.collapsed #memory-list-title { display:none; }
+  #memory-list.collapsed #memory-list-body { display:none; }
+  .memory-list-toggle { font-size:12px; color:#95a5a6; margin-left:auto; }
+  #memory-list.collapsed .memory-list-toggle { margin-left:0; }
+  .memory-list-item { padding:10px 12px; border-bottom:1px solid #0f3460; cursor:pointer; transition:background .15s; }
+  .memory-list-item:hover { background:#1a1a2e; }
+  .memory-list-item.active { background:#0f3460; }
+  .memory-list-text { font-size:12px; color:#e0e0e0; line-height:1.5; margin-bottom:4px; }
+  .memory-list-meta { font-size:11px; color:#95a5a6; display:flex; align-items:center; gap:6px; flex-wrap:wrap; }
+  .memory-list-meta .grooming-action { margin-bottom:0; padding:1px 6px; font-size:10px; }
+  .memory-list-meta .grooming-pending-badge { margin-left:0; }
+  .memory-list-empty { padding:16px 12px; font-size:12px; color:#7f8c8d; }
+
   .detail-title { font-size:16px; font-weight:600; margin-bottom:12px; color:#3498db; }
   .detail-section { margin-bottom:16px; }
   .detail-label { font-size:12px; color:#7f8c8d; margin-bottom:4px; }
@@ -850,6 +870,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
 <div class="main">
   <div id="graph-container"></div>
+  <div id="memory-list">
+    <div class="memory-list-head" onclick="toggleMemoryList()" title="点击收起/展开">
+      <span id="memory-list-title">记忆列表</span>
+      <span id="memory-list-toggle" class="memory-list-toggle">▾</span>
+    </div>
+    <div id="memory-list-body"></div>
+  </div>
   <div id="detail-panel">
     <div id="detail-panel-body">
     <div class="detail-title" id="detail-title"></div>
@@ -923,6 +950,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
   const thicknessMap = {{ thickness_json | safe }};
   const mergeHintsPayload = {{ merge_hints_json | safe }};
   let selectedId = null;
+  let memoryListCollapsed = false;
   const deletedNodeIds = new Set();
   let lastSearchResults = [];
   let lastSearchPayload = null;
@@ -973,6 +1001,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     document.getElementById('detail-panel').classList.add('visible');
     renderGroomingPanel(mem);
     loadTimeline(id);
+    updateMemoryListHighlight();
   }
 
   function renderGroomingPanel(mem) {
@@ -1129,6 +1158,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
           delete memoriesMap[selectedId];
           hideDetail();
           updateStats();
+          renderMemoryList();
         } else {
           alert('删除失败: ' + result.error);
         }
@@ -1587,10 +1617,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
 
   function doSearch() {
     const query = document.getElementById('search-input').value.trim();
+    syncUrlWithFilters();
     if (!query) {
       document.getElementById('search-results').classList.remove('visible');
       applyGraphVisibility(null, []);
       updateStats();
+      renderMemoryList();
       return;
     }
     const projectFilter = document.getElementById('project-filter').value;
@@ -1609,6 +1641,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         const matchSet = new Set(results.map(item => item.id));
         renderSearchResults(payload);
         applyGraphVisibility(matchSet, results);
+        renderMemoryList();
         const visibleCount = nodes.get().filter(n => !n.hidden).length;
         document.getElementById('stats').innerHTML =
           '检索 ' + results.length + ' 条 | 图谱可见 ' + visibleCount + ' 节点' +
@@ -1629,15 +1662,120 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
       } else {
         doSearch();
       }
-      return;
+    } else {
+      lastSearchPayload = null;
+      lastSearchResults = [];
+      document.getElementById('search-results').classList.remove('visible');
+      applyGraphVisibility(null, []);
+      updateStats();
     }
-    applyGraphVisibility(null, []);
-    updateStats();
+    renderMemoryList();
+    syncUrlWithFilters();
   }
 
   document.getElementById('project-filter').addEventListener('change', onFilterChange);
   document.getElementById('category-filter').addEventListener('change', onFilterChange);
   document.getElementById('grooming-filter').addEventListener('change', onFilterChange);
+
+  function getUrlParams() {
+    const params = new URLSearchParams(window.location.search);
+    const out = {};
+    ['project', 'category', 'grooming', 'q', 'list'].forEach(key => {
+      const value = params.get(key);
+      if (value) out[key] = value;
+    });
+    return out;
+  }
+
+  function syncUrlWithFilters() {
+    const params = new URLSearchParams();
+    const project = document.getElementById('project-filter').value;
+    const category = document.getElementById('category-filter').value;
+    const grooming = document.getElementById('grooming-filter').value;
+    const q = document.getElementById('search-input').value.trim();
+    if (project) params.set('project', project);
+    if (category) params.set('category', category);
+    if (grooming) params.set('grooming', grooming);
+    if (q) params.set('q', q);
+    if (memoryListCollapsed) params.set('list', '0');
+    const queryString = params.toString();
+    history.replaceState(null, '', queryString ? ('?' + queryString) : window.location.pathname);
+  }
+
+  function memoryListItems() {
+    const filters = getFilters();
+    let items = Object.values(memoriesMap).filter(mem => passesFilters(mem, filters));
+    if (lastSearchPayload) {
+      const matchSet = new Set(lastSearchResults.map(item => item.id));
+      items = items.filter(mem => matchSet.has(mem.id));
+    }
+    return items.sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+  }
+
+  function groomingActionBadgeHtml(mem) {
+    const grooming = mem.grooming || {};
+    const hint = mem.merge_hint || null;
+    let html = '';
+    if (grooming.action) {
+      html += '<span class="grooming-action ' + grooming.action + '">' + (grooming.action_label || grooming.action) + '</span>';
+    }
+    if (hint && hint.target_id) {
+      html += '<span class="grooming-action merge">合并 → ' + hint.target_id.slice(0, 8) + '...</span>';
+    }
+    if (!grooming.action && !hint) {
+      html += '<span class="grooming-pending-badge">待确认</span>';
+    }
+    return html;
+  }
+
+  function renderMemoryList() {
+    const panel = document.getElementById('memory-list');
+    const body = document.getElementById('memory-list-body');
+    panel.classList.toggle('collapsed', memoryListCollapsed);
+    document.getElementById('memory-list-toggle').textContent = memoryListCollapsed ? '▸' : '▾';
+    const items = memoryListItems();
+    document.getElementById('memory-list-title').textContent = '记忆列表 (' + items.length + ')';
+    if (memoryListCollapsed) {
+      body.innerHTML = '';
+      return;
+    }
+    if (!items.length) {
+      body.innerHTML = '<div class="memory-list-empty">无匹配记忆</div>';
+      return;
+    }
+    body.innerHTML = '';
+    items.forEach(mem => {
+      const row = document.createElement('div');
+      row.className = 'memory-list-item' + (selectedId === mem.id ? ' active' : '');
+      row.dataset.id = mem.id;
+      const text = mem.text.length > 46 ? mem.text.slice(0, 46) + '...' : mem.text;
+      let metaHtml = '<span>' + (mem.category || 'episodic') + '</span>';
+      if (mem.project) metaHtml += '<span>' + mem.project + '</span>';
+      if (mem.grooming && mem.grooming.pending) metaHtml += ' · ' + groomingActionBadgeHtml(mem);
+      row.innerHTML =
+        '<div class="memory-list-text">' + text + '</div>' +
+        '<div class="memory-list-meta">' + metaHtml + '</div>';
+      row.onclick = () => {
+        selectedId = mem.id;
+        jumpToMemory(mem.id);
+      };
+      body.appendChild(row);
+    });
+  }
+
+  function updateMemoryListHighlight() {
+    const rows = document.querySelectorAll('#memory-list-body .memory-list-item');
+    rows.forEach(row => {
+      row.classList.toggle('active', row.dataset.id === selectedId);
+    });
+  }
+
+  function toggleMemoryList() {
+    memoryListCollapsed = !memoryListCollapsed;
+    renderMemoryList();
+    syncUrlWithFilters();
+    network.redraw();
+  }
 
   document.getElementById('search-input').addEventListener('keydown', function(e) {
     if (e.key === 'Enter') doSearch();
@@ -1660,6 +1798,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     edges.update(edgesData.map(e => ({...e})));
     hideDetail();
     updateStats();
+    renderMemoryList();
+    syncUrlWithFilters();
   }
 
   function saveMetadata() {
@@ -1758,6 +1898,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
           delete memoriesMap[selectedId];
           hideDetail();
           updateStats();
+          renderMemoryList();
         } else {
           alert('删除失败: ' + result.error);
         }
@@ -1768,7 +1909,24 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     const count = nodes.getIds().length;
     document.getElementById('total-count').textContent = count;
   }
-  updateStats();
+
+  // 从 URL 恢复筛选条件与搜索词（刷新后保持视图）
+  const urlParams = getUrlParams();
+  ['project', 'category', 'grooming'].forEach(key => {
+    if (urlParams[key]) {
+      document.getElementById(key + '-filter').value = urlParams[key];
+    }
+  });
+  if (urlParams.list === '0') memoryListCollapsed = true;
+  if (urlParams.q) {
+    document.getElementById('search-input').value = urlParams.q;
+    updateStats();
+    doSearch();
+  } else {
+    applyGraphVisibility(null, []);
+    updateStats();
+  }
+  renderMemoryList();
 </script>
 </body>
 </html>'''
