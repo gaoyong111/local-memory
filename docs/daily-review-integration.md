@@ -141,8 +141,8 @@ run_episodic_grooming(dry_run=false)
 | `check-missed-run` | 漏跑检测（工作日化：工作日 09:00 期望一次复盘，周末/节假日不产生期望）+ 返回扫描起点 |
 | `renewal-due` | cron 续期到期判断（阈值 = 3 天 + 区间内周末/节假日天数，节假日读 `~/daily-reviews/holidays.yaml`，每年初手动更新） |
 | `list-sessions` | Claude/Cursor 会话清单 |
-| `git-log` | 扫描 `~/Desktop/h5_release/` git 提交 |
-| `tool-stats` | 工具调用次数与授权方式 |
+| `git-log` | 扫描 `~/Desktop/h5_release/` 本人（`--author=gaoyong`）git 提交，跨仓库去重 |
+| `tool-stats` | 工具调用次数与授权方式（2026-09-02 起不统计 Cursor 会话：无消息级 timestamp 只能近似计数、工具命名不同，属噪声） |
 | `diff` / `snapshot` | local-memory 快照与对比（diff 在进化提取**之后**） |
 | `record-scan-end` | 写入下次扫描起点（2026-07-30 起写复盘结束时刻 now，上次执行窗口不重扫；终点只前进不后退） |
 | `log-cron-renewal` | cron 续期日志（含 lastFiredAt） |

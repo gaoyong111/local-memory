@@ -636,12 +636,12 @@ def _escape_md_cell(text: str) -> str:
     return text.replace('|', '\\|').replace('\n', ' ').strip()
 
 
-def _git_log_since(repo: str, since: str) -> list[dict[str, str]]:
-    """返回单仓库 since 之后的提交列表。"""
+def _git_log_since(repo: str, since: str, author: str) -> list[dict[str, str]]:
+    """返回单仓库 since 之后、指定作者（git --author 匹配名/邮箱）的提交列表。"""
     fmt = '%H|%h|%ci|%s'
     try:
         proc = subprocess.run(
-            ['git', '-C', repo, 'log', f'--since={since}', f'--format={fmt}'],
+            ['git', '-C', repo, 'log', '--all', f'--author={author}', f'--since={since}', f'--format={fmt}'],
             capture_output=True,
             text=True,
             timeout=60,
@@ -694,14 +694,19 @@ def cmd_git_log(args: argparse.Namespace) -> int:
     since = args.since
     root = os.path.expanduser(args.root)
     projects: list[dict[str, Any]] = []
+    seen_hashes: set[str] = set()
     for repo in _find_git_repos(root):
-        commits = _git_log_since(repo, since)
+        commits = _git_log_since(repo, since, args.author)
         if not commits:
             continue
+        unique = [c for c in commits if c['hash_full'] not in seen_hashes]
+        seen_hashes.update(c['hash_full'] for c in commits)
+        if not unique:
+            continue
         projects.append({
-            'name': os.path.basename(repo.rstrip('/')) or repo,
+            'name': os.path.relpath(repo, root),
             'path': repo,
-            'commits': commits,
+            'commits': unique,
         })
 
     report = {
@@ -841,10 +846,12 @@ def _collect_tool_stats(sessions: list[dict[str, Any]], since_ts: float) -> dict
         container = session.get('container') or ''
         if not path or not os.path.exists(path):
             continue
+        if container == 'Cursor':
+            # 2026-09-01 用户决策：Cursor 会话不纳入统计（工具命名不同且无消息级 timestamp，计数为近似噪声）
+            cursor_sessions += 1
+            continue
         if container == 'Claude':
             claude_sessions += 1
-        elif container == 'Cursor':
-            cursor_sessions += 1
         for tool_use in _iter_tool_uses(path, container, since_ts):
             name = tool_use.get('name') or ''
             input_data = tool_use.get('input') or {}
@@ -874,7 +881,7 @@ def _collect_tool_stats(sessions: list[dict[str, Any]], since_ts: float) -> dict
         'rows': rows,
         'notes': [
             'Claude 会话按 JSONL timestamp 精确过滤 tool_use。',
-            'Cursor 会话无消息级 timestamp，纳入文件的 tool_use 全部计数（近似值）。',
+            'Cursor 会话不纳入统计（2026-09-01 用户决策：无消息级 timestamp 且工具命名不同，计数为近似噪声）。',
         ],
     }
 
@@ -1007,6 +1014,7 @@ def main() -> int:
     p_git_log = sub.add_parser('git-log', help='扫描 git 仓库并按项目分组输出提交')
     p_git_log.add_argument('--since', required=True, help='扫描起点，如 "2026-06-24 11:50"')
     p_git_log.add_argument('--root', default=DEFAULT_GIT_ROOT, help='git 仓库根目录')
+    p_git_log.add_argument('--author', default='gaoyong', help='按作者过滤提交（git --author 匹配 name/email 子串）')
     p_git_log.add_argument('--output', help='JSON 输出路径')
     p_git_log.add_argument('--markdown', help='Markdown 表格输出路径')
     p_git_log.set_defaults(func=cmd_git_log)
