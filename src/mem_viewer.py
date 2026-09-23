@@ -621,11 +621,12 @@ def execute_grooming_merge(source_id: str, hinted_target_id: str = '') -> dict:
     }
 
 
-from flask import Flask, jsonify, render_template_string, request  # noqa: E402
+from flask import Flask, jsonify, render_template_string, request, url_for  # noqa: E402
 
 app = Flask(__name__)
 
-VIS_JS_CDN = 'https://unpkg.com/vis-network@9.1.9/standalone/umd/vis-network.min.js'
+# 本地静态文件（src/static/vendor/），替代原 unpkg CDN（2026-09-02：CDN 加载失败改本地）
+VIS_JS_STATIC = 'vendor/vis-network.min.js'
 
 HTML_TEMPLATE = '''<!DOCTYPE html>
 <html lang="zh">
@@ -942,7 +943,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
   <span class="legend">●无变更 ◆1次更新 ★2+次更新 | 大=重复提及多 | 光晕=重复≥3</span>
 </div>
 
-<script src="{{ vis_js_cdn }}"></script>
+<script src="{{ vis_js_src }}"></script>
 <script>
   const nodesData = {{ nodes_json | safe }};
   const edgesData = {{ edges_json | safe }};
@@ -1989,7 +1990,7 @@ def index():
         category_items=category_items,
         category_colors=CATEGORY_COLORS,
         category_colors_json=category_colors_json,
-        vis_js_cdn=VIS_JS_CDN,
+        vis_js_src=url_for('static', filename=VIS_JS_STATIC),
         global_color=_GLOBAL_COLOR,
         mcp_search_max_results=MCP_SEARCH_MAX_RESULTS,
     )

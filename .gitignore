@@ -10,6 +10,7 @@ build/
 # IDE
 .idea/
 .vscode/
+.workbuddy/
 *.swp
 
 # Local env & real config (never commit secrets / live pool config)

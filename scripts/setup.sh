@@ -22,7 +22,14 @@ mkdir -p "$RUNTIME_DIR" "$RUNTIME_DIR/scripts" "$POOL_DIR/pending" "$POOL_DIR/sy
 cp "$REPO_ROOT/src/"*.py "$RUNTIME_DIR/"
 cp "$REPO_ROOT/src/mem_viewer.sh" "$RUNTIME_DIR/"
 chmod +x "$RUNTIME_DIR/mem_viewer.sh"
-echo "[1/5] 源码已 cp 到 runtime"
+# mem_viewer 图谱依赖本地 vis-network（src/static/vendor/，替代原 CDN），缺则图谱 404
+if [ -d "$REPO_ROOT/src/static" ]; then
+    mkdir -p "$RUNTIME_DIR/static"
+    cp -R "$REPO_ROOT/src/static/." "$RUNTIME_DIR/static/"
+else
+    echo "警告: src/static 缺失，mem_viewer 图谱将不可用" >&2
+fi
+echo "[1/5] 源码已 cp 到 runtime（含 static/）"
 
 # 2. 辅助脚本 + 配置模板（runtime 供 pool_manager 新建池时 seed）
 cp "$REPO_ROOT/scripts/"*.py "$RUNTIME_DIR/scripts/" 2>/dev/null || true
