@@ -50,6 +50,10 @@ _BASH_FIRST_TOKENS = frozenset({
     'ffprobe', 'ffmpeg', 'whisper', 'tesseract', 'cargo', 'brew', 'claude',
 })
 _LOCAL_CONFIG = os.path.join(os.path.dirname(__file__), 'review_helpers.local.json')
+ZCODE_DB = os.path.expanduser('~/.zcode/cli/db/db.sqlite')
+ZCODE_TRANSCRIPT_DIR = os.path.join(DATA_DIR, 'zcode-transcripts')
+# ZCode user 消息里 harness 注入内容的识别前缀（实测：TodoWrite 提醒不带 XML 标签）
+_ZCODE_INJECTED_PREFIXES = ('<system-reminder>', "The TodoWrite tool hasn't been used recently")
 
 
 def _home_username() -> str:
@@ -159,10 +163,9 @@ def _claude_session_in_range(path: str, since_ts: float) -> bool:
     return False
 
 
-def _collect_session_inventory(since_ts: float) -> list[dict[str, Any]]:
-    """扫描 Claude + Cursor 会话，返回结构化清单（不含提取摘要）。"""
+def _scan_claude_sessions(since_ts: float) -> list[dict[str, Any]]:
+    """Claude 会话扫描：JSONL 内任一行 timestamp ≥ since 即纳入。"""
     sessions: list[dict[str, Any]] = []
-
     claude_glob = os.path.expanduser('~/.claude/projects/**/*.jsonl')
     for path in glob.glob(claude_glob, recursive=True):
         if '/subagents/' in path:
@@ -176,7 +179,12 @@ def _collect_session_inventory(since_ts: float) -> list[dict[str, Any]]:
             'path': path,
             'filter': 'timestamp',
         })
+    return sessions
 
+
+def _scan_cursor_sessions(since_ts: float) -> list[dict[str, Any]]:
+    """Cursor 会话扫描：JSONL 无消息级 timestamp，按文件 mtime 筛选。"""
+    sessions: list[dict[str, Any]] = []
     cursor_glob = os.path.expanduser('~/.cursor/projects/**/agent-transcripts/**/*.jsonl')
     for path in glob.glob(cursor_glob, recursive=True):
         if '/subagents/' in path:
@@ -190,7 +198,127 @@ def _collect_session_inventory(since_ts: float) -> list[dict[str, Any]]:
             'path': path,
             'filter': 'mtime',
         })
+    return sessions
 
+
+def _zcode_connect_ro() -> sqlite3.Connection | None:
+    """只读打开 ZCode 主数据库（WAL 模式下与运行中的 ZCode 并发安全）。"""
+    if not os.path.exists(ZCODE_DB):
+        return None
+    try:
+        return sqlite3.connect(f'file:{ZCODE_DB}?mode=ro', uri=True)
+    except sqlite3.Error:
+        return None
+
+
+def _export_zcode_transcript(session_id: str, title: str) -> str:
+    """导出 ZCode 会话的对话转录 markdown，返回文件路径（覆盖写）。
+
+    只导 user/assistant 文本与工具调用摘要行；reasoning、system-reminder
+    注入条目和工具输出不导，控制体积与噪音。会话级已过时间筛，内容导全量
+    （跨界长会话需要完整上下文）。
+    """
+    conn = _zcode_connect_ro()
+    if conn is None:
+        return ''
+    short_id = session_id.removeprefix('sess_')[:8]
+    lines: list[str] = [f'# ZCode 会话 {short_id}', '']
+    if title:
+        lines += [f'> {title}', '']
+    try:
+        messages = conn.execute(
+            'SELECT id, time_created, data FROM message WHERE session_id = ? '
+            'ORDER BY time_created, sequence',
+            (session_id,),
+        ).fetchall()
+        for msg_id, msg_ts, msg_data in messages:
+            try:
+                role = json.loads(msg_data).get('role') or ''
+            except (json.JSONDecodeError, TypeError):
+                continue
+            if role not in ('user', 'assistant'):
+                continue
+            ts_str = datetime.fromtimestamp(msg_ts / 1000).strftime('%m-%d %H:%M')
+            parts = conn.execute(
+                'SELECT data FROM part WHERE message_id = ? ORDER BY time_created, sequence',
+                (msg_id,),
+            ).fetchall()
+            for (part_data,) in parts:
+                try:
+                    p = json.loads(part_data)
+                except (json.JSONDecodeError, TypeError):
+                    continue
+                ptype = p.get('type') or ''
+                if ptype == 'text':
+                    text = (p.get('text') or '').strip()
+                    if not text or (role == 'user' and text.startswith(_ZCODE_INJECTED_PREFIXES)):
+                        continue
+                    lines += [f'## {role} ({ts_str})', '', text, '']
+                elif ptype == 'tool':
+                    tool_name = p.get('tool') or 'unknown'
+                    command = ((p.get('state') or {}).get('input') or {}).get('command') or ''
+                    summary = command[:100].replace('\n', ' ') if command else ''
+                    detail = f': {summary}' if summary else ''
+                    lines += [f'- [tool] {tool_name}{detail}']
+    except sqlite3.Error:
+        return ''
+    finally:
+        conn.close()
+
+    os.makedirs(ZCODE_TRANSCRIPT_DIR, exist_ok=True)
+    out_path = os.path.join(ZCODE_TRANSCRIPT_DIR, f'{short_id}.md')
+    with open(out_path, 'w', encoding='utf-8') as f:
+        f.write('\n'.join(lines) + '\n')
+    return out_path
+
+
+def _scan_zcode_sessions(since_ts: float) -> list[dict[str, Any]]:
+    """ZCode 会话扫描：只读 db.sqlite，time_updated ≥ since 纳入并导出对话转录。
+
+    排除两类非原生会话（与 Claude 排除 /subagents/ 同理）：
+    - sess_subagent%：子代理会话
+    - claude-import%：从 Claude Code 导入的历史会话——time_updated 是导入
+      时刻而非对话时刻（导入日全量误报），且内容与 Claude 容器扫描重复
+    """
+    conn = _zcode_connect_ro()
+    if conn is None:
+        return []
+    try:
+        rows = conn.execute(
+            "SELECT id, directory, title FROM session "
+            "WHERE time_updated >= ? AND id NOT LIKE 'sess_subagent%' "
+            "AND id NOT LIKE 'claude-import-%' "
+            'ORDER BY time_updated',
+            (int(since_ts * 1000),),
+        ).fetchall()
+    except sqlite3.Error:
+        return []
+    finally:
+        conn.close()
+
+    sessions: list[dict[str, Any]] = []
+    for session_id, directory, title in rows:
+        transcript = _export_zcode_transcript(session_id, title or '')
+        if not transcript:
+            continue
+        sessions.append({
+            'id': session_id.removeprefix('sess_')[:8],
+            'container': 'ZCode',
+            'project': os.path.basename(directory.rstrip('/')) or '(全局)',
+            'path': transcript,
+            'filter': 'sqlite',
+            'zcode_session_id': session_id,
+        })
+    return sessions
+
+
+def _collect_session_inventory(since_ts: float) -> list[dict[str, Any]]:
+    """扫描 Claude + Cursor + ZCode 会话，返回结构化清单（不含提取摘要）。"""
+    sessions = (
+        _scan_claude_sessions(since_ts)
+        + _scan_cursor_sessions(since_ts)
+        + _scan_zcode_sessions(since_ts)
+    )
     sessions.sort(key=lambda s: (s['container'], s['project'], s['id']))
     return sessions
 
@@ -415,17 +543,91 @@ def _load_holidays() -> set[date]:
     return holidays
 
 
-def _is_workday(d: date, holidays: set[date]) -> bool:
-    """周末或法定节假日为非工作日；调休工作日不处理（阈值略延长，方向安全）。"""
+def _is_workday(d: date, holidays: set[date], workdays: set[date] | None = None) -> bool:
+    """工作日判定（全日历语义）：调休补班日（workdays 清单）视为工作日，
+    其余按「周一~周五 且 非法定节假日」。"""
+    if workdays and d in workdays:
+        return True
     return d.weekday() < 5 and d not in holidays
 
 
-def _non_workdays_between(start: date, end: date, holidays: set[date]) -> int:
-    """(start, end] 区间内的非工作日天数。"""
+def _load_workdays() -> set[date]:
+    """读 holidays.yaml 的 workdays: 段（调休上班日），解析 '- YYYY-MM-DD' 行。
+
+    与 _load_holidays 的区别：只解析 workdays: 之后的行。
+    """
+    workdays: set[date] = set()
+    if not os.path.exists(HOLIDAYS_FILE):
+        return workdays
+    pattern = re.compile(r'^\s*-\s*(\d{4}-\d{2}-\d{2})\s*$')
+    in_workdays = False
+    try:
+        with open(HOLIDAYS_FILE, encoding='utf-8') as f:
+            for line in f:
+                if re.match(r'^\s*workdays\s*:', line):
+                    in_workdays = True
+                    continue
+                if re.match(r'^\s*[A-Za-z_]+\s*:', line):
+                    in_workdays = False
+                    continue
+                if not in_workdays:
+                    continue
+                match = pattern.match(line)
+                if match:
+                    try:
+                        workdays.add(datetime.strptime(match.group(1), '%Y-%m-%d').date())
+                    except ValueError:
+                        continue
+    except OSError:
+        pass
+    return workdays
+
+
+def cmd_holiday_check(args: argparse.Namespace) -> int:
+    """复盘日历守卫（全判定）：cron 每天触发，是否复盘由此处决定。
+
+    - 法定节假日（holidays 且非 workdays 补班）→ exit 3（跳过）
+    - 调休补班日（workdays）→ exit 0（正常复盘，即使今天是周六/周日）
+    - 普通工作日 → exit 0（正常复盘）
+    - 普通周末（不在 holidays 也不在 workdays）→ exit 2（跳过）
+    exit 0 才执行复盘，其余直接结束不产出文档。
+    """
+    today = datetime.now().date()
+    holidays = _load_holidays()
+    workdays = _load_workdays()
+    is_holiday = today in holidays and today not in workdays
+    is_makeup = today in workdays
+    is_plain_weekend = today.weekday() >= 5 and not is_holiday and not is_makeup
+    result = {
+        'today': today.isoformat(),
+        'weekday': ['周一', '周二', '周三', '周四', '周五', '周六', '周日'][today.weekday()],
+        'is_legal_holiday': is_holiday,
+        'is_makeup_workday': is_makeup,
+        'is_plain_weekend': is_plain_weekend,
+        'skip_review': is_holiday or is_plain_weekend,
+    }
+    if is_holiday:
+        result['message'] = f'今日为法定节假日（{today.month}月{today.day}日），复盘跳过，节后首期自然补续'
+    elif is_makeup:
+        result['message'] = '今日为调休补班日，正常复盘'
+    elif is_plain_weekend:
+        result['message'] = '今日为普通周末，复盘跳过'
+    else:
+        result['message'] = '非节假日，正常复盘'
+    print(json.dumps(result, ensure_ascii=False, indent=2))
+    if is_holiday:
+        return 3
+    if is_plain_weekend:
+        return 2
+    return 0
+
+
+def _non_workdays_between(start: date, end: date, holidays: set[date], workdays: set[date] | None = None) -> int:
+    """(start, end] 区间内的非工作日天数（调休补班日计为工作日）。"""
     count = 0
     d = start + timedelta(days=1)
     while d <= end:
-        if not _is_workday(d, holidays):
+        if not _is_workday(d, holidays, workdays):
             count += 1
         d += timedelta(days=1)
     return count
@@ -462,8 +664,9 @@ def cmd_renewal_due(args: argparse.Namespace) -> int:
     created_date = datetime.fromtimestamp(created_ts).date()
     today = datetime.now().date()
     holidays = _load_holidays()
+    workdays = _load_workdays()
     age_days = (today - created_date).days
-    non_workdays = _non_workdays_between(created_date, today, holidays)
+    non_workdays = _non_workdays_between(created_date, today, holidays, workdays)
     threshold = RENEWAL_BASE_DAYS + non_workdays
     result = {
         'due': age_days >= threshold,
@@ -474,6 +677,7 @@ def cmd_renewal_due(args: argparse.Namespace) -> int:
         'created_at': datetime.fromtimestamp(created_ts).strftime('%Y-%m-%d %H:%M'),
         'cron_id': task.get('id'),
         'holidays_loaded': len(holidays),
+        'workdays_loaded': len(workdays),
     }
     print(json.dumps(result, ensure_ascii=False, indent=2))
     return 0
@@ -518,15 +722,17 @@ def cmd_check_missed_run(args: argparse.Namespace) -> int:
     hours = (datetime.now().timestamp() - scan_start_ts) / 3600
     # 工作日化漏跑检测：每个工作日 09:00 期望一次复盘；
     # (scan_start, now - grace] 内存在期望运行时刻即漏跑。
-    # grace 内的期望时刻视为「当前正在执行的本轮」，周末/节假日不产生期望。
+    # grace 内的期望时刻视为「当前正在执行的本轮」，周末/节假日不产生期望，
+    # 调休补班日（workdays 清单）产生期望。
     holidays = _load_holidays()
+    workdays = _load_workdays()
     now_ts = datetime.now().timestamp()
     grace_cutoff = now_ts - MISSED_RUN_GRACE_HOURS * 3600
     expected_missed: list[str] = []
     d = datetime.fromtimestamp(scan_start_ts).date()
     today = datetime.now().date()
     while d <= today:
-        if _is_workday(d, holidays):
+        if _is_workday(d, holidays, workdays):
             expected_ts = datetime(d.year, d.month, d.day, EXPECTED_RUN_HOUR).timestamp()
             if scan_start_ts < expected_ts <= grace_cutoff:
                 expected_missed.append(
@@ -576,17 +782,19 @@ def cmd_record_scan_end(args: argparse.Namespace) -> int:
 
 
 def cmd_list_sessions(args: argparse.Namespace) -> int:
-    """列出时间范围内的 Claude/Cursor 会话清单。"""
+    """列出时间范围内的 Claude/Cursor/ZCode 会话清单。"""
     since_ts = _parse_since(args.since)
     sessions = _collect_session_inventory(since_ts)
     claude_count = sum(1 for s in sessions if s['container'] == 'Claude')
     cursor_count = sum(1 for s in sessions if s['container'] == 'Cursor')
+    zcode_count = sum(1 for s in sessions if s['container'] == 'ZCode')
     report = {
         'since': args.since,
         'since_ts': since_ts,
         'total': len(sessions),
         'claude': claude_count,
         'cursor': cursor_count,
+        'zcode': zcode_count,
         'sessions': sessions,
     }
 
@@ -598,8 +806,8 @@ def cmd_list_sessions(args: argparse.Namespace) -> int:
 
     if args.markdown:
         lines = [
-            f"> 共扫描 {len(sessions)} 个会话（Claude {claude_count} + Cursor {cursor_count}）。"
-            f"筛选起点：{args.since}",
+            f"> 共扫描 {len(sessions)} 个会话（Claude {claude_count} + Cursor {cursor_count}"
+            f" + ZCode {zcode_count}）。筛选起点：{args.since}",
             '',
             '| # | 容器 | 项目 | 会话 ID | 提取内容摘要 |',
             '|---|------|------|---------|-------------|',
@@ -835,11 +1043,41 @@ def _iter_tool_uses(path: str, container: str, since_ts: float) -> Iterator[dict
         return
 
 
+def _iter_zcode_tool_uses(session_id: str, since_ts: float) -> Iterator[tuple[str, str]]:
+    """遍历 ZCode 会话的 tool_usage 行，yield (tool_name, bash_command)。
+
+    started_at（毫秒）按行精确过滤；Bash 命令参数经 part 表 callID
+    关联取 state.input.command。
+    """
+    conn = _zcode_connect_ro()
+    if conn is None:
+        return
+    try:
+        rows = conn.execute(
+            """
+            SELECT u.tool_name, json_extract(p.data, '$.state.input.command')
+            FROM tool_usage u
+            LEFT JOIN part p
+              ON p.session_id = u.session_id
+             AND json_extract(p.data, '$.callID') = u.tool_call_id
+            WHERE u.session_id = ? AND u.started_at >= ?
+            """,
+            (session_id, int(since_ts * 1000)),
+        ).fetchall()
+    except sqlite3.Error:
+        return
+    finally:
+        conn.close()
+    for name, command in rows:
+        yield name or '', command or ''
+
+
 def _collect_tool_stats(sessions: list[dict[str, Any]], since_ts: float) -> dict[str, Any]:
     allow_patterns = _load_allow_patterns()
     counts: Counter[str] = Counter()
     claude_sessions = 0
     cursor_sessions = 0
+    zcode_sessions = 0
 
     for session in sessions:
         path = session.get('path') or ''
@@ -849,6 +1087,14 @@ def _collect_tool_stats(sessions: list[dict[str, Any]], since_ts: float) -> dict
         if container == 'Cursor':
             # 2026-09-01 用户决策：Cursor 会话不纳入统计（工具命名不同且无消息级 timestamp，计数为近似噪声）
             cursor_sessions += 1
+            continue
+        if container == 'ZCode':
+            # 2026-09-07 接入：db.sqlite tool_usage 有行级时间戳，是精确数据（区别于 Cursor 的跳过）
+            zcode_sessions += 1
+            for name, command in _iter_zcode_tool_uses(session.get('zcode_session_id') or '', since_ts):
+                key = _normalize_bash(command) if name == 'Bash' else name
+                if key:
+                    counts[key] += 1
             continue
         if container == 'Claude':
             claude_sessions += 1
@@ -878,10 +1124,13 @@ def _collect_tool_stats(sessions: list[dict[str, Any]], since_ts: float) -> dict
         'session_count': len(sessions),
         'claude_sessions': claude_sessions,
         'cursor_sessions': cursor_sessions,
+        'zcode_sessions': zcode_sessions,
         'rows': rows,
         'notes': [
             'Claude 会话按 JSONL timestamp 精确过滤 tool_use。',
             'Cursor 会话不纳入统计（2026-09-01 用户决策：无消息级 timestamp 且工具命名不同，计数为近似噪声）。',
+            'ZCode 会话纳入统计（2026-09-07 接入）：db.sqlite tool_usage 表行级时间戳精确过滤；'
+            '授权列按 Claude settings allowlist 口径标注，ZCode 原生 approval_status 当前全部为 none（自动放行）。',
         ],
     }
 
@@ -991,6 +1240,9 @@ def main() -> int:
     p_missed = sub.add_parser('check-missed-run', help='检测是否漏跑复盘（工作日化）')
     p_missed.set_defaults(func=cmd_check_missed_run)
 
+    p_holiday = sub.add_parser('holiday-check', help='假期守卫：法定节假日 exit 3（调休补班日正常）')
+    p_holiday.set_defaults(func=cmd_holiday_check)
+
     p_renewal_due = sub.add_parser('renewal-due', help='判断 cron 是否到期续期（周末/节假日不计龄）')
     p_renewal_due.set_defaults(func=cmd_renewal_due)
 
@@ -1005,7 +1257,7 @@ def main() -> int:
     p_scan_end.add_argument('--manual', action='store_true', help='手动复盘：写 now 而非 cron lastFiredAt')
     p_scan_end.set_defaults(func=cmd_record_scan_end)
 
-    p_sessions = sub.add_parser('list-sessions', help='列出时间范围内的 Claude/Cursor 会话')
+    p_sessions = sub.add_parser('list-sessions', help='列出时间范围内的 Claude/Cursor/ZCode 会话')
     p_sessions.add_argument('--since', required=True, help='扫描起点，如 "2026-06-24 11:50"')
     p_sessions.add_argument('--output', help='JSON 清单输出路径')
     p_sessions.add_argument('--markdown', help='Markdown 表格 stub 输出路径')
