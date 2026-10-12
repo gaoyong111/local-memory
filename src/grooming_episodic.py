@@ -32,7 +32,7 @@ category 含义：
 - promote：事件已沉淀为稳定事实(reference)或可复用流程(workflow)；不确定则 keep
 - keep：个人生活事件、独特决策(含 Why/How)、不确定、仅有 merge 可能（merge 由系统单独处理）
 
-宁可 keep 也不要误删。只输出 JSON。"""
+倾向性：宁可建议 delete 交用户确认，也不要把可疑条目 keep 埋掉——所有 delete 只是建议，最终由用户在 mem_viewer 拍板，不会被自动执行。过时判定（旧方案/旧参数/已被新机制取代）不算误删，属典型 delete。仍完全不确定的才 keep。只输出 JSON。"""
 
 
 class LlmClient(Protocol):
@@ -227,7 +227,7 @@ def _rule_based_decision(
             reason=f'与高重叠记忆 {top.get("id", "")[:8]}… 可能重复，见当次合并建议',
         )
 
-    return GroomingDecision(action='keep', reason='暂无明确 delete/promote 动作，建议保留观察')
+    return GroomingDecision(action='keep', reason='无明确 delete/promote 信号，建议保留观察')
 
 
 def build_merge_hints(
