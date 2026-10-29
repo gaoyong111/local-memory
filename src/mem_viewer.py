@@ -777,9 +777,82 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
   .legend-shape.dot { border-radius:50%; }
   .legend-shape.diamond { border-radius:2px; transform:rotate(45deg) scale(0.7); }
   .legend-shape.star { clip-path:polygon(50% 0%, 61% 35%, 98% 35%, 68% 57%, 79% 91%, 50% 70%, 21% 91%, 32% 57%, 2% 35%, 39% 35%); }
+
+  #toast-container { position:fixed; top:16px; right:16px; z-index:200; display:flex; flex-direction:column; gap:8px; }
+  .toast { padding:10px 16px; border-radius:6px; font-size:13px; color:#fff; max-width:420px; word-break:break-all; box-shadow:0 2px 8px rgba(0,0,0,0.35); animation:toast-in .2s ease-out; }
+  .toast.success { background:#2ecc71; }
+  .toast.error { background:#e74c3c; }
+  .toast.info { background:#3498db; }
+  @keyframes toast-in { from { transform:translateX(20px); opacity:0; } to { transform:translateX(0); opacity:1; } }
+
+  #review-panel { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:none; align-items:center; justify-content:center; z-index:90; }
+  #review-panel.visible { display:flex; }
+  #review-card { width:min(860px, 94vw); max-height:90vh; background:#16213e; border:1px solid #0f3460; border-radius:10px; display:flex; flex-direction:column; overflow:hidden; }
+  #review-head { display:flex; align-items:center; gap:10px; padding:14px 18px; border-bottom:1px solid #0f3460; flex-shrink:0; }
+  #review-progress { font-size:13px; color:#95a5a6; }
+  #review-title { font-size:15px; font-weight:600; color:#3498db; flex:1; }
+  #review-close { background:none; border:none; color:#95a5a6; font-size:18px; cursor:pointer; }
+  #review-body { flex:1; overflow-y:auto; padding:16px 18px; min-height:0; }
+  .review-meta { font-size:12px; color:#95a5a6; margin-bottom:10px; }
+  .review-text-box { border:1px solid #0f3460; border-radius:6px; padding:10px 12px; font-size:13px; line-height:1.6; white-space:pre-wrap; word-break:break-word; background:#1a1a2e; margin-bottom:12px; max-height:280px; overflow-y:auto; }
+  .review-reason { font-size:13px; color:#f39c12; line-height:1.5; white-space:pre-wrap; margin-bottom:12px; }
+  .review-compare { display:flex; gap:10px; margin-bottom:12px; }
+  .review-compare-col { flex:1; min-width:0; }
+  .review-compare-label { font-size:12px; color:#7f8c8d; margin-bottom:4px; }
+  .review-compare-label b { color:#e0e0e0; }
+  .review-compare-text { border:1px solid #0f3460; border-radius:6px; padding:8px 10px; font-size:12px; line-height:1.5; white-space:pre-wrap; word-break:break-word; background:#1a1a2e; max-height:220px; overflow-y:auto; }
+  #review-foot { display:flex; gap:8px; padding:12px 18px; border-top:1px solid #0f3460; flex-shrink:0; flex-wrap:wrap; align-items:center; }
+  #review-foot .spacer { flex:1; }
+  #review-foot button { padding:8px 14px; border:none; border-radius:6px; cursor:pointer; font-size:13px; }
+  .rv-keep { background:#2ecc71; color:#fff; }
+  .rv-delete { background:#e74c3c; color:#fff; }
+  .rv-promote { background:#3498db; color:#fff; }
+  .rv-merge { background:#f39c12; color:#1a1a2e; }
+  .rv-skip { background:#7f8c8d; color:#fff; }
+  #review-delete-reason { width:100%; padding:8px 10px; border-radius:6px; border:1px solid #0f3460; background:#1a1a2e; color:#e0e0e0; font-size:12px; margin-top:8px; }
+
+  #merge-compare-panel { position:fixed; inset:0; background:rgba(0,0,0,0.6); display:none; align-items:center; justify-content:center; z-index:95; }
+  #merge-compare-panel.visible { display:flex; }
+  #merge-compare-card { width:min(860px, 94vw); max-height:85vh; background:#16213e; border:1px solid #f39c12; border-radius:10px; display:flex; flex-direction:column; overflow:hidden; }
+  #merge-compare-title { font-size:15px; font-weight:600; color:#f39c12; padding:14px 18px; border-bottom:1px solid #0f3460; flex-shrink:0; }
+  #merge-compare-body { flex:1; overflow-y:auto; padding:16px 18px; min-height:0; }
+  #merge-compare-foot { display:flex; gap:8px; justify-content:flex-end; padding:12px 18px; border-top:1px solid #0f3460; flex-shrink:0; }
+  #merge-compare-foot button { padding:8px 14px; border:none; border-radius:6px; cursor:pointer; font-size:13px; }
+
+  .list-check { margin-right:6px; cursor:pointer; flex-shrink:0; }
+  #batch-bar { display:none; align-items:center; gap:10px; padding:8px 12px; background:#0f3460; border-bottom:1px solid #0f3460; font-size:12px; flex-shrink:0; flex-wrap:wrap; }
+  #batch-bar.visible { display:flex; }
+  #batch-bar button { padding:4px 10px; border:none; border-radius:4px; cursor:pointer; font-size:12px; }
+  .batch-keep { background:#2ecc71; color:#fff; }
+  .batch-promote { background:#3498db; color:#fff; }
+  .batch-clear { background:#7f8c8d; color:#fff; }
 </style>
 </head>
 <body>
+
+<div id="toast-container"></div>
+
+<div id="review-panel">
+  <div id="review-card">
+    <div id="review-head">
+      <span id="review-progress"></span>
+      <span id="review-title"></span>
+      <button id="review-close" onclick="closeReview()" title="关闭 (Esc)">×</button>
+    </div>
+    <div id="review-body"></div>
+    <div id="review-foot"></div>
+  </div>
+</div>
+
+<div id="merge-compare-panel" onclick="onMergeCompareBackdrop(event)">
+  <div id="merge-compare-card" onclick="event.stopPropagation()">
+    <div id="merge-compare-title"></div>
+    <div id="merge-compare-body"></div>
+    <div id="merge-compare-foot">
+      <button class="rv-skip" onclick="closeMergeCompare()">关闭</button>
+    </div>
+  </div>
+</div>
 
 <div class="toolbar">
   <input type="text" id="search-input" placeholder="搜索记忆..." />
@@ -797,10 +870,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
   </select>
   <select id="grooming-filter">
     <option value="">全部记忆</option>
-    <option value="pending">待确认 episodic ({{ pending_grooming_count }})</option>
+    <option value="review">待处理 ({{ grooming_counts.review }})</option>
+    <option value="pending">待确认 pending ({{ grooming_counts.pending }})</option>
+    <option value="delete">建议删除 ({{ grooming_counts.delete }})</option>
+    <option value="promote">建议升类 ({{ grooming_counts.promote }})</option>
+    <option value="merge">建议合并 ({{ grooming_counts.merge }})</option>
+    <option value="keep">建议保留 ({{ grooming_counts.keep }})</option>
   </select>
   <button class="btn-search" onclick="doSearch()">搜索</button>
   <button class="btn-add" onclick="openAddModal()">+ 新增记忆</button>
+  <button id="btn-review-queue" onclick="openReview()">待处理队列 ({{ grooming_counts.review }})</button>
   <button class="btn-reset" onclick="resetGraph()">重置</button>
 </div>
 
@@ -875,6 +954,12 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     <div class="memory-list-head" onclick="toggleMemoryList()" title="点击收起/展开">
       <span id="memory-list-title">记忆列表</span>
       <span id="memory-list-toggle" class="memory-list-toggle">▾</span>
+    </div>
+    <div id="batch-bar">
+      <label><input type="checkbox" id="batch-select-all" class="list-check" onchange="toggleSelectAll(this.checked)" />全选</label>
+      <button class="batch-keep" onclick="batchConfirm()">批量确认保留</button>
+      <button class="batch-promote" onclick="batchPromote()">批量升类</button>
+      <button class="batch-clear" onclick="clearSelection()">取消选择</button>
     </div>
     <div id="memory-list-body"></div>
   </div>
@@ -956,6 +1041,27 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
   let lastSearchResults = [];
   let lastSearchPayload = null;
   const MCP_SEARCH_MAX_RESULTS = {{ mcp_search_max_results }};
+
+  function showToast(message, type, duration) {
+    let container = document.getElementById('toast-container');
+    if (!container) {
+      container = document.createElement('div');
+      container.id = 'toast-container';
+      document.body.appendChild(container);
+    }
+    const toast = document.createElement('div');
+    toast.className = 'toast ' + (type || 'info');
+    toast.textContent = message;
+    container.appendChild(toast);
+    setTimeout(() => toast.remove(), duration || 3200);
+  }
+
+  function syncGroomingUi() {
+    updateGroomingFilterLabel();
+    const btn = document.getElementById('btn-review-queue');
+    if (btn) btn.textContent = '待处理队列 (' + computeGroomingCounts().review + ')';
+    onFilterChange();
+  }
 
   const nodes = new vis.DataSet(nodesData);
   const edges = new vis.DataSet(edgesData);
@@ -1057,6 +1163,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     }
     if (mergeHint && mergeHint.target_id) {
       actionsEl.innerHTML += '<button class="btn-grooming-merge" onclick="applyGroomingMerge()">合并（重校验）</button>';
+      actionsEl.innerHTML += '<button class="btn-grooming-confirm" onclick="openMergeCompare(selectedId)">对照查看</button>';
       actionsEl.innerHTML += '<button class="btn-grooming-confirm" onclick="jumpToMemory(\\'' + mergeHint.target_id + '\\')">定位目标</button>';
     }
   }
@@ -1065,13 +1172,35 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     return Object.values(memoriesMap).filter(mem => mem.grooming && mem.grooming.pending).length;
   }
 
+  function computeGroomingCounts() {
+    const counts = { review: 0, pending: 0, delete: 0, promote: 0, keep: 0, merge: 0 };
+    Object.values(memoriesMap).forEach(mem => {
+      const g = mem.grooming || {};
+      const hint = mem.merge_hint;
+      const action = g.action || '';
+      if (g.pending) counts.pending += 1;
+      if (g.pending || action === 'delete' || action === 'promote' || hint) counts.review += 1;
+      if (action === 'delete' || action === 'promote' || action === 'keep') counts[action] += 1;
+      if (hint) counts.merge += 1;
+    });
+    return counts;
+  }
+
   function updateGroomingFilterLabel() {
     const select = document.getElementById('grooming-filter');
-    const pendingCount = countPendingGrooming();
-    const pendingOption = select.querySelector('option[value="pending"]');
-    if (pendingOption) {
-      pendingOption.textContent = '待确认 episodic (' + pendingCount + ')';
-    }
+    const counts = computeGroomingCounts();
+    const labels = {
+      review: '待处理',
+      pending: '待确认 pending',
+      delete: '建议删除',
+      promote: '建议升类',
+      merge: '建议合并',
+      keep: '建议保留',
+    };
+    Object.keys(labels).forEach(value => {
+      const option = select.querySelector('option[value="' + value + '"]');
+      if (option) option.textContent = labels[value] + ' (' + counts[value] + ')';
+    });
   }
 
   function confirmGroomingKeep() {
@@ -1085,7 +1214,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
       .then(r => r.json())
       .then(result => {
         if (!result.ok) {
-          alert('确认失败: ' + (result.error || '未知错误'));
+          showToast('确认失败: ' + (result.error || '未知错误'), 'error');
           if (btn) {
             btn.disabled = false;
             btn.textContent = '确认保留';
@@ -1103,17 +1232,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
             color: { background: bg, border: bg, highlight: { background: bg, border: '#f39c12' } },
           });
         }
-        updateGroomingFilterLabel();
-        onFilterChange();
-        renderGroomingPanel(mem);
-        const metaEl = document.getElementById('grooming-meta');
-        if (metaEl) {
-          metaEl.textContent = (metaEl.textContent ? metaEl.textContent + ' · ' : '') + '✓ 已确认保留';
-        }
+        syncGroomingUi();
+        if (mem) renderGroomingPanel(mem);
+        showToast('已确认保留', 'success');
       })
       .catch(err => {
         console.error('confirm grooming failed', err);
-        alert('确认失败，请重试');
+        showToast('确认失败，请重试', 'error');
         if (btn) {
           btn.disabled = false;
           btn.textContent = '确认保留';
@@ -1128,23 +1253,61 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
       .then(r => r.json())
       .then(result => {
         if (!result.ok) {
-          alert('升类失败: ' + (result.error || '未知错误'));
+          showToast('升类失败: ' + (result.error || '未知错误'), 'error');
           return;
         }
-        location.reload();
+        const mem = memoriesMap[selectedId];
+        if (mem) {
+          mem.category = result.category || mem.category;
+          mem.category_label = result.category_label || mem.category_label;
+          mem.category_raw = result.category_raw || '';
+          mem.grooming = { pending: false, action: '', action_label: '', reason: '', target_category: '', at: mem.grooming && mem.grooming.at || '' };
+          const nodeColor = {{ category_colors_json | safe }}[mem.category] || '{{ global_color }}';
+          nodes.update({
+            id: selectedId,
+            color: { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: '#f39c12' } },
+            borderWidth: 1,
+          });
+          originalNodeColors[selectedId] = nodeColor;
+          renderGroomingPanel(mem);
+          showDetail(selectedId);
+        }
+        syncGroomingUi();
+        showToast('已升类为 ' + (result.category_label || result.category), 'success');
       })
       .catch(err => {
         console.error('promote failed', err);
-        alert('升类失败，请重试');
+        showToast('升类失败，请重试', 'error');
       });
+  }
+
+  function removeMemoryFromView(id) {
+    deletedNodeIds.add(id);
+    nodes.remove(id);
+    const relatedEdges = edges.getIds().filter(eid => {
+      const edge = edges.get(eid);
+      return edge.from === id || edge.to === id;
+    });
+    edges.remove(relatedEdges);
+    delete memoriesMap[id];
+    hideDetail();
+    updateStats();
+    renderMemoryList();
   }
 
   function applyGroomingDelete() {
     if (!selectedId) return;
     const mem = memoriesMap[selectedId];
-    const reason = (mem && mem.grooming && mem.grooming.reason)
+    const aiReason = (mem && mem.grooming && mem.grooming.reason)
       ? ('采纳 AI 删除建议: ' + mem.grooming.reason)
       : '采纳 AI 删除建议';
+    const input = prompt('删除原因（必填，可修改）：', aiReason);
+    if (input === null) return;
+    const reason = input.trim();
+    if (!reason) {
+      showToast('必须填写删除原因', 'error');
+      return;
+    }
     if (!confirm('确认删除此记忆？\\n' + reason)) return;
     fetch('/delete/' + selectedId, {
       method: 'POST',
@@ -1154,14 +1317,10 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
       .then(r => r.json())
       .then(result => {
         if (result.ok) {
-          deletedNodeIds.add(selectedId);
-          nodes.remove(selectedId);
-          delete memoriesMap[selectedId];
-          hideDetail();
-          updateStats();
-          renderMemoryList();
+          removeMemoryFromView(selectedId);
+          syncGroomingUi();
         } else {
-          alert('删除失败: ' + result.error);
+          showToast('删除失败: ' + result.error, 'error');
         }
       });
   }
@@ -1179,19 +1338,320 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
       .then(r => r.json())
       .then(result => {
         if (!result.ok) {
-          alert('合并失败: ' + (result.error || '未知错误'));
+          showToast('合并失败: ' + (result.error || '未知错误'), 'error');
           return;
         }
-        let msg = '已合并至 ' + result.target_id;
-        if (result.target_changed) msg += '（目标已变更）';
-        alert(msg);
-        location.reload();
+        const srcId = result.source_id || selectedId;
+        const tgtMem = memoriesMap[result.target_id];
+        if (tgtMem) {
+          tgtMem.merge_hint = null;
+          tgtMem.grooming = tgtMem.grooming || {};
+          tgtMem.grooming.pending = false;
+        }
+        removeMemoryFromView(srcId);
+        syncGroomingUi();
+        showToast('已合并至 ' + String(result.target_id).slice(0, 8) + '…' + (result.target_changed ? '（目标已变更）' : ''), 'success');
+        if (tgtMem) jumpToMemory(result.target_id);
       })
       .catch(err => {
         console.error('merge failed', err);
-        alert('合并失败，请重试');
+        showToast('合并失败，请重试', 'error');
       });
   }
+
+  function openMergeCompare(sourceId) {
+    const src = memoriesMap[sourceId];
+    if (!src) return;
+    const hint = src.merge_hint;
+    if (!hint || !hint.target_id) {
+      showToast('该记忆无合并建议', 'info');
+      return;
+    }
+    const target = memoriesMap[hint.target_id];
+    const panel = document.getElementById('merge-compare-panel');
+    document.getElementById('merge-compare-title').textContent =
+      '合并对照 · overlap=' + (hint.overlap != null ? Number(hint.overlap).toFixed(2) : '?');
+    document.getElementById('merge-compare-body').innerHTML =
+      '<div class="review-compare">' +
+        '<div class="review-compare-col">' +
+          '<div class="review-compare-label"><b>源（将被删除）</b> ' + sourceId.slice(0, 8) + '…</div>' +
+          '<div class="review-compare-text">' + escapeHtml(src.text) + '</div>' +
+        '</div>' +
+        '<div class="review-compare-col">' +
+          '<div class="review-compare-label"><b>目标（保留）</b> ' + (hint.target_id || '').slice(0, 8) + '…' +
+          (target ? '' : '（不在当前图谱，可能已删除）') + '</div>' +
+          '<div class="review-compare-text">' + (target ? escapeHtml(target.text) : '（无法加载目标正文）') + '</div>' +
+        '</div>' +
+      '</div>' +
+      (hint.reason ? '<div class="review-reason">AI: ' + escapeHtml(hint.reason) + '</div>' : '');
+    const foot = document.getElementById('merge-compare-foot');
+    foot.innerHTML =
+      '<button class="btn-grooming-confirm" onclick="closeMergeCompare();jumpToMemory(\\'' + hint.target_id + '\\')">定位目标</button>' +
+      '<button class="rv-merge" onclick="closeMergeCompare();applyGroomingMergeFrom(\\'' + sourceId + '\\')">合并（重校验）</button>';
+    panel.classList.add('visible');
+  }
+
+  function closeMergeCompare() {
+    document.getElementById('merge-compare-panel').classList.remove('visible');
+  }
+
+  function onMergeCompareBackdrop(event) {
+    if (event.target.id === 'merge-compare-panel') closeMergeCompare();
+  }
+
+  function applyGroomingMergeFrom(sourceId) {
+    const prev = selectedId;
+    selectedId = sourceId;
+    applyGroomingMerge();
+    selectedId = prev;
+  }
+
+  function escapeHtml(text) {
+    const div = document.createElement('div');
+    div.textContent = text == null ? '' : String(text);
+    return div.innerHTML;
+  }
+
+  function reviewQueueIds() {
+    return Object.values(memoriesMap)
+      .filter(mem => {
+        const g = mem.grooming || {};
+        return g.pending || g.action === 'delete' || g.action === 'promote' || mem.merge_hint;
+      })
+      .sort((a, b) => {
+        const rank = mem => {
+          const g = mem.grooming || {};
+          if (g.action === 'delete') return 0;
+          if (mem.merge_hint) return 1;
+          if (g.action === 'promote') return 2;
+          return 3;
+        };
+        return rank(a) - rank(b) || String(a.created_at || '').localeCompare(String(b.created_at || ''));
+      })
+      .map(mem => mem.id);
+  }
+
+  let reviewQueue = [];
+  let reviewIndex = 0;
+
+  function openReview() {
+    reviewQueue = reviewQueueIds();
+    if (!reviewQueue.length) {
+      showToast('当前无待处理记忆', 'info');
+      return;
+    }
+    reviewIndex = 0;
+    document.getElementById('review-panel').classList.add('visible');
+    renderReviewCard();
+  }
+
+  function closeReview() {
+    document.getElementById('review-panel').classList.remove('visible');
+    reviewQueue = [];
+    reviewIndex = 0;
+  }
+
+  function renderReviewCard() {
+    reviewQueue = reviewQueue.filter(id => memoriesMap[id]);
+    if (reviewIndex >= reviewQueue.length) {
+      document.getElementById('review-body').innerHTML =
+        '<div style="text-align:center;padding:40px 0;color:#2ecc71;font-size:15px">✓ 队列已清空</div>';
+      document.getElementById('review-foot').innerHTML =
+        '<span class="spacer"></span><button class="rv-skip" onclick="closeReview()">关闭</button>';
+      document.getElementById('review-progress').textContent = '';
+      document.getElementById('review-title').textContent = '';
+      syncGroomingUi();
+      return;
+    }
+
+    const id = reviewQueue[reviewIndex];
+    const mem = memoriesMap[id];
+    const g = mem.grooming || {};
+    const hint = mem.merge_hint || null;
+
+    document.getElementById('review-progress').textContent =
+      (reviewIndex + 1) + ' / ' + reviewQueue.length;
+    document.getElementById('review-title').textContent =
+      '[' + (mem.project || '全局') + '] ' + (mem.category || 'episodic');
+
+    let html = '<div class="review-meta">' + id + ' · 创建: ' + (mem.created_at || '未知');
+    if (g.action) html += ' · AI: <span class="grooming-action ' + g.action + '">' + (g.action_label || g.action) + '</span>';
+    if (g.pending) html += ' <span class="grooming-pending-badge">待确认</span>';
+    html += '</div>';
+    html += '<div class="review-text-box">' + escapeHtml(mem.text) + '</div>';
+    if (g.reason) html += '<div class="review-reason">AI 建议: ' + escapeHtml(g.reason) + '</div>';
+    if (g.action === 'promote' && g.target_category) {
+      html += '<div class="review-meta">升类目标: ' + escapeHtml(g.target_category) + '</div>';
+    }
+
+    const needCompare = (hint && hint.target_id) || (g.action === 'delete');
+    if (needCompare) {
+      const compareId = hint && hint.target_id ? hint.target_id : '';
+      const target = compareId ? memoriesMap[compareId] : null;
+      html += '<div class="review-compare">' +
+        '<div class="review-compare-col">' +
+          '<div class="review-compare-label"><b>' + (hint ? '源（合并将删除）' : '本条') + '</b> ' + id.slice(0, 8) + '…</div>' +
+          '<div class="review-compare-text">' + escapeHtml(mem.text) + '</div>' +
+        '</div>';
+      if (hint && hint.target_id) {
+        html += '<div class="review-compare-col">' +
+          '<div class="review-compare-label"><b>目标（保留）</b> ' + hint.target_id.slice(0, 8) + '…' +
+          (target ? '' : '（不在图谱，可能已删除）') + '</div>' +
+          '<div class="review-compare-text">' + (target ? escapeHtml(target.text) : '（无法加载）') + '</div>' +
+        '</div>';
+      } else {
+        html += '<div class="review-compare-col">' +
+          '<div class="review-compare-label"><b>AI 删除理由</b></div>' +
+          '<div class="review-compare-text">' + escapeHtml(g.reason || '无') + '</div>' +
+        '</div>';
+      }
+      html += '</div>';
+      if (hint && hint.reason) html += '<div class="review-reason">合并建议: ' + escapeHtml(hint.reason) + '</div>';
+    }
+
+    document.getElementById('review-body').innerHTML = html;
+
+    const foot = document.getElementById('review-foot');
+    let footHtml = '';
+    if (g.pending) footHtml += '<button class="rv-keep" onclick="reviewKeep()">确认保留</button>';
+    if (g.action === 'promote' && g.target_category) footHtml += '<button class="rv-promote" onclick="reviewPromote()">采纳升类</button>';
+    if (g.action === 'delete') footHtml += '<button class="rv-delete" onclick="reviewDelete()">采纳删除</button>';
+    if (hint && hint.target_id) {
+      footHtml += '<button class="rv-merge" onclick="reviewMerge()">合并（重校验）</button>';
+      footHtml += '<button class="rv-skip" onclick="closeReview();jumpToMemory(\\'' + hint.target_id + '\\')">定位目标</button>';
+    }
+    footHtml += '<span class="spacer"></span>';
+    footHtml += '<button class="rv-skip" onclick="reviewSkip()">跳过</button>';
+    foot.innerHTML = footHtml;
+  }
+
+  function reviewAdvance() {
+    reviewIndex += 1;
+    renderReviewCard();
+  }
+
+  function reviewSkip() {
+    reviewAdvance();
+  }
+
+  function reviewKeep() {
+    const id = reviewQueue[reviewIndex];
+    fetch('/api/grooming/confirm/' + encodeURIComponent(id), { method: 'POST' })
+      .then(r => r.json())
+      .then(result => {
+        if (!result.ok) {
+          showToast('确认失败: ' + (result.error || '未知错误'), 'error');
+          return;
+        }
+        const mem = memoriesMap[id];
+        if (mem) {
+          mem.grooming = result.grooming || mem.grooming || {};
+          mem.grooming.pending = false;
+          const bg = originalNodeColors[id] || '#95a5a6';
+          nodes.update({ id: id, borderWidth: 1, color: { background: bg, border: bg, highlight: { background: bg, border: '#f39c12' } } });
+        }
+        showToast('已确认保留', 'success');
+        reviewAdvance();
+      })
+      .catch(() => showToast('确认失败，请重试', 'error'));
+  }
+
+  function reviewPromote() {
+    const id = reviewQueue[reviewIndex];
+    fetch('/api/grooming/promote/' + encodeURIComponent(id), { method: 'POST' })
+      .then(r => r.json())
+      .then(result => {
+        if (!result.ok) {
+          showToast('升类失败: ' + (result.error || '未知错误'), 'error');
+          return;
+        }
+        const mem = memoriesMap[id];
+        if (mem) {
+          mem.category = result.category || mem.category;
+          mem.category_label = result.category_label || mem.category_label;
+          mem.category_raw = result.category_raw || '';
+          mem.grooming = { pending: false, action: '', action_label: '', reason: '', target_category: '', at: '' };
+          const nodeColor = {{ category_colors_json | safe }}[mem.category] || '{{ global_color }}';
+          nodes.update({ id: id, color: { background: nodeColor, border: nodeColor, highlight: { background: nodeColor, border: '#f39c12' } }, borderWidth: 1 });
+          originalNodeColors[id] = nodeColor;
+        }
+        showToast('已升类为 ' + (result.category_label || result.category), 'success');
+        reviewAdvance();
+      })
+      .catch(() => showToast('升类失败，请重试', 'error'));
+  }
+
+  function reviewDelete() {
+    const id = reviewQueue[reviewIndex];
+    const mem = memoriesMap[id];
+    const aiReason = (mem && mem.grooming && mem.grooming.reason) ? ('采纳 AI 删除建议: ' + mem.grooming.reason) : '采纳 AI 删除建议';
+    const input = prompt('删除原因（必填，可修改）：', aiReason);
+    if (input === null) return;
+    const reason = input.trim();
+    if (!reason) {
+      showToast('必须填写删除原因', 'error');
+      return;
+    }
+    if (!confirm('确认删除？\\n' + reason)) return;
+    fetch('/delete/' + encodeURIComponent(id), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ reason: reason }),
+    })
+      .then(r => r.json())
+      .then(result => {
+        if (!result.ok) {
+          showToast('删除失败: ' + result.error, 'error');
+          return;
+        }
+        removeMemoryFromView(id);
+        showToast('已删除', 'success');
+        reviewAdvance();
+      })
+      .catch(() => showToast('删除失败，请重试', 'error'));
+  }
+
+  function reviewMerge() {
+    const id = reviewQueue[reviewIndex];
+    const mem = memoriesMap[id];
+    const targetId = mem && mem.merge_hint ? mem.merge_hint.target_id : '';
+    if (!confirm('合并前将重新校验目标，确认继续？')) return;
+    fetch('/api/grooming/merge/' + encodeURIComponent(id), {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ target_id: targetId }),
+    })
+      .then(r => r.json())
+      .then(result => {
+        if (!result.ok) {
+          showToast('合并失败: ' + (result.error || '未知错误'), 'error');
+          return;
+        }
+        removeMemoryFromView(result.source_id || id);
+        const tgtMem = memoriesMap[result.target_id];
+        if (tgtMem) {
+          tgtMem.merge_hint = null;
+          tgtMem.grooming = tgtMem.grooming || {};
+          tgtMem.grooming.pending = false;
+        }
+        showToast('已合并至 ' + String(result.target_id).slice(0, 8) + '…', 'success');
+        reviewAdvance();
+      })
+      .catch(() => showToast('合并失败，请重试', 'error'));
+  }
+
+  document.addEventListener('keydown', function(e) {
+    if (e.key !== 'Escape') return;
+    const mergePanel = document.getElementById('merge-compare-panel');
+    if (mergePanel.classList.contains('visible')) {
+      closeMergeCompare();
+      return;
+    }
+    const reviewPanel = document.getElementById('review-panel');
+    if (reviewPanel.classList.contains('visible')) {
+      closeReview();
+    }
+  });
 
   function actionLabel(action) {
     const labels = {
@@ -1519,9 +1979,19 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     if (!mem) return false;
     if (filters.project && mem.project !== filters.project) return false;
     if (filters.category && mem.category !== filters.category) return false;
-    if (filters.grooming === 'pending') {
-      const pending = mem.grooming && mem.grooming.pending;
-      if (!pending) return false;
+    if (filters.grooming) {
+      const g = mem.grooming || {};
+      const hint = mem.merge_hint;
+      const action = g.action || '';
+      if (filters.grooming === 'review') {
+        if (!(g.pending || action === 'delete' || action === 'promote' || hint)) return false;
+      } else if (filters.grooming === 'pending') {
+        if (!g.pending) return false;
+      } else if (filters.grooming === 'merge') {
+        if (!hint) return false;
+      } else if (action !== filters.grooming) {
+        return false;
+      }
     }
     return true;
   }
@@ -1721,9 +2191,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
       html += '<span class="grooming-action ' + grooming.action + '">' + (grooming.action_label || grooming.action) + '</span>';
     }
     if (hint && hint.target_id) {
-      html += '<span class="grooming-action merge">合并 → ' + hint.target_id.slice(0, 8) + '...</span>';
+      html += '<span class="grooming-action merge" style="cursor:pointer" title="点击查看合并对照" onclick="event.stopPropagation();openMergeCompare(\\'' + mem.id + '\\')">合并 → ' + hint.target_id.slice(0, 8) + '...</span>';
     }
-    if (!grooming.action && !hint) {
+    if (!grooming.action && !hint && grooming.pending) {
       html += '<span class="grooming-pending-badge">待确认</span>';
     }
     return html;
@@ -1736,6 +2206,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     document.getElementById('memory-list-toggle').textContent = memoryListCollapsed ? '▸' : '▾';
     const items = memoryListItems();
     document.getElementById('memory-list-title').textContent = '记忆列表 (' + items.length + ')';
+    updateBatchBar(items);
     if (memoryListCollapsed) {
       body.innerHTML = '';
       return;
@@ -1753,8 +2224,13 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
       let metaHtml = '<span>' + (mem.category || 'episodic') + '</span>';
       if (mem.project) metaHtml += '<span>' + mem.project + '</span>';
       if (mem.grooming && mem.grooming.pending) metaHtml += ' · ' + groomingActionBadgeHtml(mem);
+      else if (mem.grooming && (mem.grooming.action === 'delete' || mem.grooming.action === 'promote')) metaHtml += ' · ' + groomingActionBadgeHtml(mem);
+      else if (mem.merge_hint) metaHtml += ' · ' + groomingActionBadgeHtml(mem);
+      const checkboxHtml = batchSelectable(mem)
+        ? '<input type="checkbox" class="list-check batch-check" data-id="' + mem.id + '"' + (batchSelected.has(mem.id) ? ' checked' : '') + ' onclick="event.stopPropagation();onBatchCheck(this)" />'
+        : '';
       row.innerHTML =
-        '<div class="memory-list-text">' + text + '</div>' +
+        '<div class="memory-list-text">' + checkboxHtml + text + '</div>' +
         '<div class="memory-list-meta">' + metaHtml + '</div>';
       row.onclick = () => {
         selectedId = mem.id;
@@ -1762,6 +2238,100 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
       };
       body.appendChild(row);
     });
+  }
+
+  const batchSelected = new Set();
+
+  function batchSelectable(mem) {
+    const g = mem.grooming || {};
+    return g.pending || g.action === 'promote';
+  }
+
+  function onBatchCheck(checkbox) {
+    if (checkbox.checked) batchSelected.add(checkbox.dataset.id);
+    else batchSelected.delete(checkbox.dataset.id);
+    updateBatchBar(memoryListItems());
+  }
+
+  function toggleSelectAll(checked) {
+    memoryListItems().forEach(mem => {
+      if (batchSelectable(mem)) {
+        if (checked) batchSelected.add(mem.id);
+        else batchSelected.delete(mem.id);
+      }
+    });
+    renderMemoryList();
+  }
+
+  function clearSelection() {
+    batchSelected.clear();
+    renderMemoryList();
+  }
+
+  function updateBatchBar(items) {
+    const bar = document.getElementById('batch-bar');
+    const selectableCount = items.filter(batchSelectable).length;
+    bar.classList.toggle('visible', selectableCount > 0);
+    if (!selectableCount) batchSelected.clear();
+    const selectAll = document.getElementById('batch-select-all');
+    if (selectAll) {
+      selectAll.checked = selectableCount > 0 && items.filter(batchSelectable).every(mem => batchSelected.has(mem.id));
+      selectAll.disabled = !selectableCount;
+    }
+  }
+
+  function batchAct(action) {
+    const ids = [...batchSelected];
+    if (!ids.length) {
+      showToast('请先勾选记忆', 'info');
+      return;
+    }
+    const label = action === 'confirm' ? '确认保留' : '升类';
+    if (!confirm('批量' + label + ' ' + ids.length + ' 条？')) return;
+    fetch('/api/grooming/batch', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ action: action, ids: ids }),
+    })
+      .then(r => r.json())
+      .then(result => {
+        if (!result.ok) {
+          showToast('批量失败: ' + (result.error || '未知错误'), 'error');
+          return;
+        }
+        result.succeeded.forEach(item => {
+          const id = item.id;
+          const mem = memoriesMap[id];
+          if (!mem) return;
+          if (action === 'promote') {
+            mem.category = item.category || mem.category;
+            mem.category_label = item.category_label || mem.category_label;
+            mem.category_raw = item.category_raw || '';
+            mem.grooming = { pending: false, action: '', action_label: '', reason: '', target_category: '', at: '' };
+          } else {
+            mem.grooming = item.grooming || mem.grooming || {};
+            mem.grooming.pending = false;
+          }
+          const bg = action === 'promote'
+            ? ({{ category_colors_json | safe }}[mem.category] || '{{ global_color }}')
+            : (originalNodeColors[id] || '#95a5a6');
+          nodes.update({ id: id, borderWidth: 1, color: { background: bg, border: bg, highlight: { background: bg, border: '#f39c12' } } });
+          originalNodeColors[id] = bg;
+        });
+        batchSelected.clear();
+        syncGroomingUi();
+        const failCount = (result.failed || []).length;
+        showToast('批量' + label + '完成：成功 ' + result.succeeded.length + ' 条' + (failCount ? '，失败 ' + failCount + ' 条' : ''), failCount ? 'error' : 'success');
+      })
+      .catch(() => showToast('批量' + label + '失败，请重试', 'error'));
+  }
+
+  function batchConfirm() {
+    batchAct('confirm');
+  }
+
+  function batchPromote() {
+    batchAct('promote');
   }
 
   function updateMemoryListHighlight() {
@@ -1940,10 +2510,20 @@ def index():
     edges = compute_edges(memories)
     thickness = compute_thickness(memories, edges)
     merge_hints_payload = read_merge_hints()
-    pending_grooming_count = sum(
-        1 for memory in memories
-        if (memory.get('grooming') or {}).get('pending')
-    )
+
+    grooming_counts = {'review': 0, 'pending': 0, 'delete': 0, 'promote': 0, 'keep': 0, 'merge': 0}
+    for m in memories:
+        g = m.get('grooming') or {}
+        hint = m.get('merge_hint')
+        action = g.get('action', '')
+        if g.get('pending'):
+            grooming_counts['pending'] += 1
+        if g.get('pending') or action in ('delete', 'promote') or hint:
+            grooming_counts['review'] += 1
+        if action in ('delete', 'promote', 'keep'):
+            grooming_counts[action] += 1
+        if hint:
+            grooming_counts['merge'] += 1
 
     nodes_json = json.dumps([
         {
@@ -1985,7 +2565,7 @@ def index():
         memories_map_json=memories_map_json,
         thickness_json=thickness_json,
         merge_hints_json=merge_hints_json,
-        pending_grooming_count=pending_grooming_count,
+        grooming_counts=grooming_counts,
         projects=projects,
         category_items=category_items,
         category_colors=CATEGORY_COLORS,
@@ -2272,6 +2852,38 @@ def grooming_merge(source_id: str):
         return jsonify({'ok': False, 'error': str(exc)}), 400
     except Exception as exc:
         return jsonify({'ok': False, 'error': str(exc)}), 500
+
+
+@app.route('/api/grooming/batch', methods=['POST'])
+def grooming_batch():
+    """批量操作：action ∈ confirm | promote。delete 不提供批量。"""
+    body = request.get_json(silent=True) or {}
+    action = str(body.get('action', '') or '').strip()
+    ids = body.get('ids') or []
+    if action not in ('confirm', 'promote'):
+        return jsonify({'ok': False, 'error': 'action 须为 confirm 或 promote（删除不支持批量）'}), 400
+    if not isinstance(ids, list) or not ids:
+        return jsonify({'ok': False, 'error': 'ids 不能为空'}), 400
+
+    succeeded: list[dict] = []
+    failed: list[dict] = []
+    for memory_id in ids:
+        try:
+            if action == 'confirm':
+                result = confirm_grooming_memory(memory_id)
+                succeeded.append({'id': memory_id, 'grooming': result.get('grooming')})
+            else:
+                result = execute_grooming_promote(memory_id)
+                confirm_grooming_memory(memory_id)
+                succeeded.append({
+                    'id': memory_id,
+                    'category': result.get('category', ''),
+                    'category_label': result.get('category_label', ''),
+                    'category_raw': result.get('category_raw', ''),
+                })
+        except Exception as exc:
+            failed.append({'id': memory_id, 'error': str(exc)})
+    return jsonify({'ok': True, 'action': action, 'succeeded': succeeded, 'failed': failed})
 
 
 @app.route('/delete/<memory_id>', methods=['POST'])

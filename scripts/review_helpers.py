@@ -211,6 +211,18 @@ def _zcode_connect_ro() -> sqlite3.Connection | None:
         return None
 
 
+def _zcode_short_id(session_id: str) -> str:
+    """ZCode 会话 id 缩写。
+
+    - `sess_<8hex>-...` → 去 sess_ 后取前 8
+    - `session_<32hex>` → 去 session_ 后取 hex 前 8（直接 [:8] 会全撞名 session_）
+    """
+    for prefix in ('sess_', 'session_'):
+        if session_id.startswith(prefix):
+            return session_id[len(prefix):][:8]
+    return session_id[:8]
+
+
 def _export_zcode_transcript(session_id: str, title: str) -> str:
     """导出 ZCode 会话的对话转录 markdown，返回文件路径（覆盖写）。
 
@@ -221,7 +233,7 @@ def _export_zcode_transcript(session_id: str, title: str) -> str:
     conn = _zcode_connect_ro()
     if conn is None:
         return ''
-    short_id = session_id.removeprefix('sess_')[:8]
+    short_id = _zcode_short_id(session_id)
     lines: list[str] = [f'# ZCode 会话 {short_id}', '']
     if title:
         lines += [f'> {title}', '']
@@ -302,7 +314,7 @@ def _scan_zcode_sessions(since_ts: float) -> list[dict[str, Any]]:
         if not transcript:
             continue
         sessions.append({
-            'id': session_id.removeprefix('sess_')[:8],
+            'id': _zcode_short_id(session_id),
             'container': 'ZCode',
             'project': os.path.basename(directory.rstrip('/')) or '(全局)',
             'path': transcript,
