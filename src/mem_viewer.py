@@ -574,7 +574,9 @@ def execute_grooming_merge(source_id: str, hinted_target_id: str = '') -> dict:
         hybrid_search_fn=hybrid_search,
     )
     if not validated:
-        raise ValueError('重校验未找到合适合并目标，请手动处理')
+        # hint 指向的目标已不存在时，重校验必然反复失败——清掉死 hint 避免用户反复撞墙
+        remove_merge_hint(source_id)
+        raise ValueError('重校验未找到合适合并目标（死 hint 已清除），请手动处理')
 
     target_id = str(validated.get('id', '') or '')
     if not target_id or target_id == source_id:
