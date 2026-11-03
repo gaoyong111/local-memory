@@ -73,6 +73,21 @@ python3 ~/.memory/runtime/search_context.py '测试'
 
 在 MCP 中注册 `local-memory`，指向 `~/.memory/runtime/mcp_server.py`；可选配置 Hook 实现发消息前自动注入记忆。
 
+### Docker / NAS 部署（多设备共享记忆）
+
+不想每台设备各存一份？在 NAS 上跑一个 server，所有设备经 HTTP MCP 连接同一份记忆库：
+
+```bash
+docker compose up -d --build
+```
+
+- Streamable HTTP MCP + Bearer token 鉴权（`MEMORY_HTTP_TOKEN`，未设置拒绝启动）
+- embedder 地址在 `docker-compose.yml` 环境变量直接指定（`MEMORY_EMBEDDER_BASE_URL`），支持复用 NAS 上已有的 Ollama
+- 管理界面 mem_viewer 可选启动（`--profile viewer`）
+- SQLite 已开 WAL，多设备并发写入安全
+
+完整步骤（代码/数据迁移、客户端接入配置、反代注意事项、备份策略）见 [docs/docker-deploy.md](docs/docker-deploy.md)。
+
 ---
 
 ## 架构概览
@@ -118,6 +133,7 @@ python3 ~/.memory/runtime/search_context.py '测试'
 | [CHANGELOG.md](CHANGELOG.md) | 版本与 breaking 变更 |
 | [architecture.md](docs/architecture.md) | 写入策略、混合检索、存储模型 |
 | [v2-design.md](docs/v2-design.md) | 概念模型、模块职责、设计决策 |
+| [docker-deploy.md](docs/docker-deploy.md) | Docker/NAS 部署：多设备 HTTP MCP 接入、数据迁移、备份 |
 | [workspace-binding.md](docs/workspace-binding.md) | 仓库级读写权限 |
 | [mem-viewer-design.md](docs/mem-viewer-design.md) | Web UI 规格 |
 | [cursor-setup.md](docs/cursor-setup.md) | Cursor MCP + Hook |

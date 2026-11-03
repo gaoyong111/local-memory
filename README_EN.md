@@ -71,6 +71,21 @@ python3 ~/.memory/runtime/search_context.py 'test query'
 
 Register the MCP server `local-memory` pointing at `~/.memory/runtime/mcp_server.py`, then optionally enable the prompt hook for automatic context injection.
 
+### Docker / NAS deployment (shared memory across devices)
+
+Rather than keeping a separate copy per machine, run one server on a NAS and connect every device to the same memory store over HTTP MCP:
+
+```bash
+docker compose up -d --build
+```
+
+- Streamable HTTP MCP with Bearer token auth (`MEMORY_HTTP_TOKEN`; startup is refused when unset)
+- Embedder endpoint is set directly in `docker-compose.yml` via `MEMORY_EMBEDDER_BASE_URL` — an existing Ollama on the NAS works out of the box
+- Optional web UI (mem_viewer) via `--profile viewer`
+- SQLite runs in WAL mode, safe for concurrent writes from multiple devices
+
+Full guide (code/data migration, client configuration, reverse-proxy notes, backups): [docs/docker-deploy.md](docs/docker-deploy.md).
+
 ---
 
 ## Architecture at a glance
@@ -118,6 +133,7 @@ Details → [docs/architecture.md](docs/architecture.md) · [docs/v2-design.md](
 | [CHANGELOG.md](CHANGELOG.md) | Releases and breaking changes |
 | [architecture.md](docs/architecture.md) | Write policies, hybrid search, storage model |
 | [v2-design.md](docs/v2-design.md) | Concept model, module map, design decisions |
+| [docker-deploy.md](docs/docker-deploy.md) | Docker/NAS deployment: multi-device HTTP MCP access, data migration, backups |
 | [workspace-binding.md](docs/workspace-binding.md) | Per-repo read/write permissions |
 | [mem-viewer-design.md](docs/mem-viewer-design.md) | Web UI specification |
 | [cursor-setup.md](docs/cursor-setup.md) | Cursor MCP + hooks |
