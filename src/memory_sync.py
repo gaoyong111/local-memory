@@ -2,9 +2,10 @@
 
 from __future__ import annotations
 
+import sqlite3
+
 import json
 import os
-import sqlite3
 import time
 import uuid
 from dataclasses import dataclass, field
@@ -13,6 +14,7 @@ from typing import Any
 from memory_lineage import record_event
 
 from memory_paths import ACTIVE_DB, HISTORY_DB, SYNC_PENDING_DIR
+from sqlite_conn import connect_db
 
 MAX_SYNC_RETRY = 3
 
@@ -109,7 +111,7 @@ def _db(path) -> str:
 def ensure_history_schema() -> None:
     history_path = _db(HISTORY_DB)
     os.makedirs(os.path.dirname(history_path), exist_ok=True)
-    conn = sqlite3.connect(history_path)
+    conn = connect_db(history_path)
     try:
         conn.executescript(_HISTORY_SCHEMA)
         conn.commit()
@@ -128,7 +130,7 @@ def record_memory_event(
     actor: str = 'system',
 ) -> None:
     ensure_history_schema()
-    conn = sqlite3.connect(_db(HISTORY_DB))
+    conn = connect_db(_db(HISTORY_DB))
     try:
         conn.execute(
             """
@@ -154,7 +156,7 @@ def record_memory_event(
 
 def ensure_active_schema() -> None:
     os.makedirs(os.path.dirname(_db(ACTIVE_DB)), exist_ok=True)
-    conn = sqlite3.connect(_db(ACTIVE_DB))
+    conn = connect_db(_db(ACTIVE_DB))
     try:
         conn.executescript(_ACTIVE_SCHEMA)
         conn.commit()
@@ -178,7 +180,7 @@ def _counts_match(op: str, actual: dict[str, int], *, phase: str = 'all') -> boo
 def _attach_connection() -> sqlite3.Connection:
     ensure_active_schema()
     ensure_history_schema()
-    conn = sqlite3.connect(_db(ACTIVE_DB))
+    conn = connect_db(_db(ACTIVE_DB))
     conn.execute(f"ATTACH DATABASE '{_db(HISTORY_DB)}' AS hist")
     conn.execute(f"ATTACH DATABASE '{_db(DELETED_DB)}' AS arch")
     return conn
@@ -187,7 +189,7 @@ def _attach_connection() -> sqlite3.Connection:
 def get_active_record(memory_id: str) -> dict[str, Any] | None:
     ensure_active_schema()
     migrate_active_if_needed()
-    conn = sqlite3.connect(_db(ACTIVE_DB))
+    conn = connect_db(_db(ACTIVE_DB))
     try:
         row = conn.execute(
             """
@@ -215,7 +217,7 @@ def load_active_memories() -> dict[str, str]:
     """keyword 检索数据源：仅 active_memories（方案一）。"""
     ensure_active_schema()
     migrate_active_if_needed()
-    conn = sqlite3.connect(_db(ACTIVE_DB))
+    conn = connect_db(_db(ACTIVE_DB))
     try:
         rows = conn.execute(
             'SELECT memory_id, content FROM active_memories ORDER BY updated_at DESC'
@@ -228,7 +230,7 @@ def load_active_memories() -> dict[str, str]:
 def load_active_metadata() -> dict[str, dict[str, str]]:
     ensure_active_schema()
     migrate_active_if_needed()
-    conn = sqlite3.connect(_db(ACTIVE_DB))
+    conn = connect_db(_db(ACTIVE_DB))
     try:
         rows = conn.execute(
             'SELECT memory_id, project, category, lang FROM active_memories'
@@ -252,7 +254,7 @@ def migrate_active_if_needed() -> dict[str, Any]:
     migrate_history_deletes_if_needed()
     ensure_active_schema()
 
-    conn = sqlite3.connect(_db(ACTIVE_DB))
+    conn = connect_db(_db(ACTIVE_DB))
     try:
         existing = conn.execute('SELECT COUNT(*) FROM active_memories').fetchone()[0]
         if existing > 0:
@@ -274,7 +276,7 @@ def migrate_active_if_needed() -> dict[str, Any]:
     now = _now_iso()
     inserted = 0
 
-    conn = sqlite3.connect(_db(ACTIVE_DB))
+    conn = connect_db(_db(ACTIVE_DB))
     try:
         for memory_id, meta in zip(ids, metas):
             if not memory_id or memory_id in deleted:
@@ -535,7 +537,7 @@ def sync_active_insert(
 
     now = _now_iso()
     counts: dict[str, int] = {}
-    conn = sqlite3.connect(_db(ACTIVE_DB))
+    conn = connect_db(_db(ACTIVE_DB))
     try:
         conn.execute('BEGIN')
         cur = conn.execute(
@@ -597,7 +599,7 @@ def sync_active_update_meta(
     new_category = record['category'] if category is None else (category or '')
     new_lang = record['lang'] if lang is None else (lang or 'zh')
 
-    conn = sqlite3.connect(_db(ACTIVE_DB))
+    conn = connect_db(_db(ACTIVE_DB))
     try:
         conn.execute('BEGIN')
         cur = conn.execute(

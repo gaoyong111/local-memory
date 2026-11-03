@@ -317,5 +317,47 @@ def switch_pool(pool_id: str) -> str:
     return f'已切换 active pool → {pool_id}\n\n{format_pools_text()}'
 
 
+def _build_http_asgi_app():
+    """HTTP 模式（NAS 远程接入）：Streamable HTTP MCP + Bearer token 鉴权。"""
+    import hmac
+
+    token = os.environ.get('MEMORY_HTTP_TOKEN', '')
+    if not token:
+        raise SystemExit('MEMORY_HTTP_TOKEN 未设置：HTTP 模式必须配置访问令牌')
+
+    app = mcp.streamable_http_app()
+
+    async def auth_middleware(scope, receive, send):
+        if scope['type'] != 'http':
+            await app(scope, receive, send)
+            return
+        headers = dict(scope.get('headers') or [])
+        auth = headers.get(b'authorization', b'')
+        authorized = auth.startswith(b'Bearer ') and hmac.compare_digest(
+            auth[7:], token.encode('utf-8'),
+        )
+        if not authorized:
+            await send({
+                'type': 'http.response.start',
+                'status': 401,
+                'headers': [(b'content-type', b'application/json')],
+            })
+            await send({'type': 'http.response.body', 'body': b'{"error":"unauthorized"}'})
+            return
+        await app(scope, receive, send)
+
+    return auth_middleware
+
+
 if __name__ == '__main__':
-    mcp.run()
+    if os.environ.get('MEMORY_MCP_TRANSPORT') == 'http':
+        import uvicorn
+
+        uvicorn.run(
+            _build_http_asgi_app(),
+            host=os.environ.get('MEMORY_HTTP_HOST', '0.0.0.0'),
+            port=int(os.environ.get('MEMORY_HTTP_PORT', '8000')),
+            log_level=os.environ.get('MEMORY_HTTP_LOG_LEVEL', 'info'),
+        )
+    else:
+        mcp.run()

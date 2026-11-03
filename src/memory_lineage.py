@@ -4,11 +4,11 @@ from __future__ import annotations
 
 import json
 import os
-import sqlite3
 import time
 from typing import Any
 
 from memory_paths import HISTORY_DB, LINEAGE_PATH
+from sqlite_conn import connect_db
 
 VALID_ACTIONS = frozenset({
     'ADD',
@@ -84,7 +84,7 @@ def _history_events(memory_id: str) -> list[dict[str, Any]]:
     if not os.path.isfile(history_path):
         return []
 
-    conn = sqlite3.connect(history_path)
+    conn = connect_db(history_path)
     rows: list[tuple] = []
     try:
         if conn.execute(

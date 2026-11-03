@@ -2,14 +2,16 @@
 
 from __future__ import annotations
 
-import os
 import sqlite3
+
+import os
 import time
 from typing import Any, Callable
 
 from memory_lineage import record_event
 
 from memory_paths import DELETED_DB, HISTORY_DB
+from sqlite_conn import connect_db
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS deleted_memories (
@@ -34,7 +36,7 @@ def _now_iso() -> str:
 def ensure_schema() -> None:
     """初始化 deleted_archive.db 表结构。"""
     os.makedirs(os.path.dirname(str(DELETED_DB)), exist_ok=True)
-    conn = sqlite3.connect(str(DELETED_DB))
+    conn = connect_db(str(DELETED_DB))
     try:
         conn.executescript(_SCHEMA)
         conn.commit()
@@ -44,7 +46,7 @@ def ensure_schema() -> None:
 
 def _connect() -> sqlite3.Connection:
     ensure_schema()
-    return sqlite3.connect(str(DELETED_DB))
+    return connect_db(str(DELETED_DB))
 
 
 def load_deleted_ids() -> set[str]:
@@ -108,7 +110,7 @@ def _snapshot_from_chroma(memory_id: str) -> dict[str, str]:
 def _snapshot_from_history(memory_id: str) -> dict[str, str]:
     if not os.path.isfile(str(HISTORY_DB)):
         return {}
-    conn = sqlite3.connect(str(HISTORY_DB))
+    conn = connect_db(str(HISTORY_DB))
     try:
         rows = conn.execute(
             """
@@ -127,7 +129,7 @@ def _snapshot_from_history(memory_id: str) -> dict[str, str]:
         if text:
             return {'content': text, 'project': '', 'category': ''}
 
-    conn = sqlite3.connect(str(HISTORY_DB))
+    conn = connect_db(str(HISTORY_DB))
     try:
         row = conn.execute(
             """
@@ -167,7 +169,7 @@ def migrate_history_deletes_if_needed() -> dict[str, int]:
         if existing > 0:
             return {'skipped': 1, 'existing': existing}
 
-        conn_history = sqlite3.connect(str(HISTORY_DB))
+        conn_history = connect_db(str(HISTORY_DB))
         try:
             if not conn_history.execute(
                 "SELECT name FROM sqlite_master WHERE type='table' AND name='history'"

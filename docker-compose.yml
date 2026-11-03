@@ -1,0 +1,43 @@
+services:
+  local-memory:
+    build: .
+    image: local-memory:latest
+    container_name: local-memory
+    restart: unless-stopped
+    ports:
+      - '8000:8000'
+    env_file:
+      - .env
+    volumes:
+      - ./data:/data
+
+  # 可选 embedder：docker compose --profile ollama up -d
+  # 池 config.json 的 embedder.base_url 指向 http://ollama:11434
+  ollama:
+    image: ollama/ollama:latest
+    container_name: local-memory-ollama
+    profiles: ['ollama']
+    restart: unless-stopped
+    ports:
+      - '127.0.0.1:11434:11434'
+    volumes:
+      - ./ollama:/root/.ollama
+
+  # 可选管理界面：docker compose --profile viewer up -d
+  # 无自带鉴权，公网反代需在 Lucky 层加认证，或仅内网访问
+  mem-viewer:
+    image: local-memory:latest
+    build: .
+    container_name: local-memory-viewer
+    profiles: ['viewer']
+    restart: unless-stopped
+    command: python3 /app/src/mem_viewer.py
+    ports:
+      - '8001:8765'
+    env_file:
+      - .env
+    environment:
+      MEMORY_DIR: /data
+      MEMORY_VIEWER_HOST: 0.0.0.0
+    volumes:
+      - ./data:/data

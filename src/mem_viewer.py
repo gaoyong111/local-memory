@@ -49,8 +49,8 @@ from grooming_metadata import (  # noqa: E402
 from memory_lineage import build_timeline, parse_merged_from, record_event, record_merge_result  # noqa: E402
 
 # 配置
-HOST = 'localhost'
-PORT = 8765
+HOST = os.environ.get('MEMORY_VIEWER_HOST', 'localhost')
+PORT = int(os.environ.get('MEMORY_VIEWER_PORT', '8765'))
 DEFAULT_USER = os.getenv('MEMORY_USER_ID', 'default-user')
 VIEWER_WORKSPACE_ROOT = os.getenv('WORKSPACE_ROOT') or None
 # 与 mcp_server.py DEFAULT_MAX_RESULTS 保持一致，便于对比检索效果

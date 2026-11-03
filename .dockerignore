@@ -1,0 +1,11 @@
+.git
+tests
+docs
+scripts
+configs
+legacy
+src/legacy
+**/__pycache__
+*.md
+.env
+data

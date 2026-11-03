@@ -118,7 +118,14 @@ def resolve_config_path(pool_path: Path | None = None) -> Path:
 
 
 def get_chroma_collection(client: Any, pool_path: Path | None = None) -> Any:
-    return client.get_collection(get_chroma_collection_name(pool_path))
+    """缺失时自动建（全新池首装引导）；名字由 pool.meta.json 集中解析，不会误建。"""
+    from chromadb.errors import NotFoundError
+
+    name = get_chroma_collection_name(pool_path)
+    try:
+        return client.get_collection(name)
+    except NotFoundError:
+        return client.get_or_create_collection(name)
 
 
 # 池内路径常量（模块级 lazy 解析）
