@@ -2,13 +2,17 @@
 
 NAS 跑 server，多设备经 HTTP MCP 连同一份记忆库。本机保留 stdio 直跑能力不变（`MEMORY_MCP_TRANSPORT` 默认 stdio）。
 
+**背景概念**：记忆检索 = 关键词 + 语义双路。语义那一路由 embedder 把文字转成向量再算相似度，本项目用的嵌入模型是 **bge-m3**，跑在 **Ollama**（本地大模型运行器）上。所以部署机器必须能连到一个装了 bge-m3 的 Ollama——没有它，写入进 pending 队列、搜索退化为纯关键词。详见 `docker-compose.yml` 头部注释。
+
 ## 架构
 
-| 服务 | 端口 | 说明 |
+| 服务 | 宿主端口 | 说明 |
 |---|---|---|
-| local-memory | 8000 | Streamable HTTP MCP + Bearer 鉴权（核心，必起） |
-| ollama | 127.0.0.1:11434 | embedder bge-m3（profile `ollama`，可选） |
-| mem-viewer | 8001 | 管理界面（profile `viewer`，可选，无自带鉴权） |
+| local-memory | 18000 | Streamable HTTP MCP + Bearer 鉴权（核心，必起） |
+| ollama | 仅宿主回环 | 内置备选 embedder（profile `ollama`，容器走内网服务名访问，不对局域网/公网开放） |
+| mem-viewer | 18001 | 管理界面（profile `viewer`，可选，无自带鉴权） |
+
+宿主端口选 18000/18001 避开常用端口（8000 常被开发服务器占用）。宿主端口冲突时只改 compose 里映射左边，容器内端口不用动。
 
 数据根挂载 `./data`（对应本机 `~/.memory`），所有路径 env 可覆盖的既有设计直接适配容器。
 
@@ -39,25 +43,33 @@ rsync -av ~/.memory/registry.json nas:~/docker/local-memory/data/
 rsync -av ~/.memory/pools/ nas:~/docker/local-memory/data/pools/
 ```
 
-迁移后编辑 NAS 上 `data/pools/default/config.json`：
+迁移后 config.json 原样保留，embedder 地址在 `docker-compose.yml` 里用 env 指定（`MEMORY_EMBEDDER_BASE_URL`，优先于 config.json）：
 
-- 用内置 ollama 容器：`embedder.base_url` 改 `http://ollama:11434`
+- NAS 已有 Ollama：`http://172.17.0.1:11434`（docker 网关访问宿主端口），不通改 NAS 局域网 IP
+- NAS 没有 Ollama：compose 里设 `http://ollama:11434` 并加 `--profile ollama` 启动内置容器
 - LLM 段保留原样（NAS 与 LLM 网关同内网，直连可达）；需要密钥的话把 `ANTHROPIC_AUTH_TOKEN` 写进 NAS `.env`
 
 ### 4. 启动
 
 ```bash
-docker compose --profile ollama --profile viewer up -d --build
-docker compose exec ollama ollama pull bge-m3   # 约 1.2GB，一次性
+docker compose up -d --build
+docker compose logs local-memory | tail -5   # Uvicorn running on 0.0.0.0:8000（容器内端口）
 ```
 
-只用外部 Ollama（比如已有 LAN 内其他机跑 Ollama）则去掉 `--profile ollama`，config.json 的 `base_url` 指向那台机器。
+NAS 没有 Ollama 时改为：
+
+```bash
+docker compose --profile ollama up -d --build
+docker compose exec ollama ollama pull bge-m3   # 下载嵌入模型，约 1.2GB，一次性
+```
+
+管理界面（可选）：`docker compose --profile viewer up -d`，宿主 18001 端口。
 
 ### 5. 验证
 
 ```bash
-curl -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8000/mcp -d '{}'    # 401
-curl -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:8000/mcp \
+curl -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:18000/mcp -d '{}'    # 401
+curl -o /dev/null -w '%{http_code}\n' -X POST http://127.0.0.1:18000/mcp \
     -H "Authorization: Bearer $MEMORY_HTTP_TOKEN" \
     -H 'Content-Type: application/json' -H 'Accept: application/json, text/event-stream' \
     -d '{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersion":"2025-03-26","capabilities":{},"clientInfo":{"name":"curl","version":"0"}}}'  # 200
@@ -85,7 +97,7 @@ ZCode / Claude Code 的 MCP 配置（stdio 配置替换为 http）：
 
 - Streamable HTTP 是 POST + SSE 流式响应：反代规则需关闭响应缓冲（buffering），放行 `text/event-stream`
 - 建议该反代子域走 HTTPS；token 是唯一防线，务必长随机
-- mem-viewer（8001）无自带鉴权：公网反代需在 Lucky 层加认证，或仅内网使用
+- mem-viewer（18001）无自带鉴权：公网反代需在 Lucky 层加认证，或仅内网使用
 
 ## 备份
 

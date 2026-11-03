@@ -345,12 +345,17 @@ def probe_llm_reachable(*, timeout: float = 2.0) -> str | None:
 
 
 def get_embedder_config() -> tuple[str, str]:
-    """返回 (model, base_url)。"""
+    """返回 (model, base_url)。MEMORY_EMBEDDER_* env 优先（容器部署免改 config.json）。"""
     config = _read_config()
     embedder = config.get('embedder') or {}
     inner = embedder.get('config') if isinstance(embedder.get('config'), dict) else embedder
-    model = inner.get('model', 'bge-m3')
-    base_url = inner.get('base_url') or inner.get('ollama_base_url') or 'http://localhost:11434'
+    model = os.environ.get('MEMORY_EMBEDDER_MODEL') or inner.get('model', 'bge-m3')
+    base_url = (
+        os.environ.get('MEMORY_EMBEDDER_BASE_URL')
+        or inner.get('base_url')
+        or inner.get('ollama_base_url')
+        or 'http://localhost:11434'
+    )
     return model, base_url.rstrip('/')
 
 

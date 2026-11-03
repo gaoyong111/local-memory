@@ -1,43 +1,70 @@
+# local-memory NAS 部署（docker compose）
+#
+# 三个服务：
+#   local-memory  记忆服务本体（必启）——所有设备的 AI 通过 MCP 连它读写记忆
+#   ollama        本地模型运行器（可选）——NAS 上已有 Ollama 时不需要它
+#   mem-viewer    记忆管理界面（可选）——浏览器里看图谱/搜索/删除记忆
+#
+# 背景概念：
+#   记忆检索 = 关键词 + 语义双路。语义那一路需要把文字转成向量（embedding），
+#   干这活的叫 embedder，本项目用的模型是 bge-m3，跑在 Ollama 上。
+#   所以 local-memory 必须能连到一个装了 bge-m3 的 Ollama，否则语义检索瘫痪
+#   （写入进 pending 队列、搜索退化为纯关键词）。
+
 services:
   local-memory:
-    build: .
+    build: .                      # 用本目录 Dockerfile 构建镜像
     image: local-memory:latest
     container_name: local-memory
-    restart: unless-stopped
+    restart: unless-stopped       # NAS 重启 / 容器崩溃后自动拉起
     ports:
-      - '8000:8000'
+      - '18000:8000'              # 宿主 18000 → 容器 8000。Lucky 反代转发目标；宿主端口冲突只改左边
     env_file:
-      - .env
+      - .env                      # 注入 .env 全部变量（MEMORY_HTTP_TOKEN 必填在这里）
+    environment:
+      # embedder 地址：env 优先级高于数据目录里的 config.json，改这里就行，不用动数据文件。
+      # 172.17.0.1 是 docker 网关地址，容器借道访问「宿主机上已有的 Ollama」。
+      # 连不通时改成 NAS 局域网 IP（如 http://192.168.2.x:11434）。
+      # NAS 上没有 Ollama：改用下面 ollama 服务，地址写 http://ollama:11434
+      MEMORY_EMBEDDER_BASE_URL: http://172.17.0.1:11434
+      # 嵌入模型名，默认 bge-m3，与现有记忆库向量一致，勿改
+      # MEMORY_EMBEDDER_MODEL: bge-m3
     volumes:
-      - ./data:/data
+      - ./data:/data              # 记忆库真身（SQLite+向量库+配置），删容器数据不丢
 
-  # 可选 embedder：docker compose --profile ollama up -d
-  # 池 config.json 的 embedder.base_url 指向 http://ollama:11434
+  # 内置 Ollama 备选：NAS 上没有现成 Ollama 时才启用。
+  # 启用步骤：上面 MEMORY_EMBEDDER_BASE_URL 改成 http://ollama:11434，然后
+  #   docker compose --profile ollama up -d
+  #   docker compose exec ollama ollama pull bge-m3   # 下载嵌入模型，约 1.2GB，一次性
   ollama:
     image: ollama/ollama:latest
     container_name: local-memory-ollama
-    profiles: ['ollama']
+    profiles: ['ollama']          # 不加 --profile ollama 就不会启动
     restart: unless-stopped
     ports:
-      - '127.0.0.1:11434:11434'
+      - '127.0.0.1:11434:11434'   # 只绑宿主回环：局域网/公网都摸不到，仅宿主机调试用；
+                                  # local-memory 容器连它走 compose 内网服务名，不经此映射
     volumes:
-      - ./ollama:/root/.ollama
+      - ./ollama:/root/.ollama    # 模型文件落宿主，重建容器不用重下
 
-  # 可选管理界面：docker compose --profile viewer up -d
-  # 无自带鉴权，公网反代需在 Lucky 层加认证，或仅内网访问
+  # 记忆管理界面（可选）：浏览器访问 http://NAS_IP:18001
+  # 启动：docker compose --profile viewer up -d
+  # 无自带登录，别把 18001 挂到公网反代；要挂需在 Lucky 层加认证，或仅内网使用
   mem-viewer:
-    image: local-memory:latest
+    image: local-memory:latest    # 与 local-memory 同一镜像，仅启动命令不同
     build: .
     container_name: local-memory-viewer
     profiles: ['viewer']
     restart: unless-stopped
     command: python3 /app/src/mem_viewer.py
     ports:
-      - '8001:8765'
+      - '18001:8765'              # 宿主 18001 → 容器内 viewer 默认端口 8765
     env_file:
       - .env
     environment:
       MEMORY_DIR: /data
-      MEMORY_VIEWER_HOST: 0.0.0.0
+      MEMORY_VIEWER_HOST: 0.0.0.0 # 不设的话 viewer 绑容器内 localhost，端口映射进不去
+      # viewer 的搜索/图谱同样要把查询转成向量，embedder 必须与上面 core 同源
+      MEMORY_EMBEDDER_BASE_URL: http://172.17.0.1:11434
     volumes:
       - ./data:/data
