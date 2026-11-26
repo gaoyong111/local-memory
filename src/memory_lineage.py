@@ -18,6 +18,8 @@ VALID_ACTIONS = frozenset({
     'DEDUP_DROP',
     'CATEGORY_CHANGE',
     'GROOMING',
+    'RESTORE',
+    'TRANSFER',
 })
 
 

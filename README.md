@@ -16,13 +16,14 @@
 
 | 能力 | 说明 |
 |------|------|
-| **混合检索** | SQLite 关键词 + Chroma 向量（bge-m3），加权 RRF 融合 |
+| **混合检索** | SQLite 关键词 + Chroma 向量（bge-m3），加权 RRF 融合 + recency 半衰期回血 |
 | **原样入库** | 写入什么存什么，入库时不经 LLM 改写 |
-| **写入策略** | 分类标签、结构化格式化、写入时 LLM 去重 |
+| **写入策略** | 分类标签、结构化格式化、写入时 LLM 去重、凭据脱敏（9 类模式统一 `[REDACTED:label]`） |
 | **多记忆池** | 工作 / 个人 / 实验场景物理隔离 |
+| **Agent 身份** | registry 登记职责 agent，各绑定专属池 + 跨池白名单，写入留身份痕与未审计标记 |
 | **工作区绑定** | 仓库级读写权限（`.cursor/memory.json`） |
 | **IDE 集成** | Cursor / Claude Code 的 MCP 与 Hook |
-| **Web UI** | `mem_viewer` 浏览、编辑、episodic 梳理 |
+| **Web UI** | `mem_viewer` 浏览、编辑、episodic 梳理、跨池审计 |
 
 ---
 
@@ -104,25 +105,27 @@ docker compose up -d --build
 
 - **记忆池（Pool）** — 自包含目录，含独立数据库与 Chroma collection
 - **项目（Project）** — 记忆的逻辑标签（`""` = 全局，`"my-app"` = 项目级）
+- **Agent 身份** — `~/.memory/registry.json` 登记 agent 与池绑定（`allowed_pools` 白名单），agent 写入自动路由到绑定池并带 `audited=false` 标记，mem_viewer 可逐条审计
 - **工作区绑定** — 可选的仓库级读写范围配置
 
 详见 [docs/architecture.md](docs/architecture.md) · [docs/v2-design.md](docs/v2-design.md)
 
 ---
 
-## MCP 工具（共 9 个）
+## MCP 工具（共 10 个）
 
 | 工具 | 说明 |
 |------|------|
-| `add_memory` | 添加记忆，支持 category metadata，写入时去重 |
-| `search_memory` | 混合检索，可选 project 过滤 |
+| `add_memory` | 添加记忆，支持 category metadata，写入时去重 + 凭据脱敏；登记 agent 可带 `agent` 身份（写绑定池、留未审计标记）与 `target_pool` 跨池写入（须在白名单内） |
+| `search_memory` | 混合检索，可选 project / pool 过滤 |
 | `get_all_memories` | 列出记忆，可选 project 过滤 |
-| `delete_memory` | 按 ID 删除（reason 必填） |
-| `retry_pending` | 重试失败的写入 / 同步 |
+| `delete_memory` | 按 ID 删除（reason 必填），可选 pool 指定非活跃池 |
+| `retry_pending` | 重试失败的写入 / 同步（按条目身份路由回原池） |
 | `run_episodic_grooming` | 批处理 episodic 质量梳理 |
-| `confirm_grooming` | 确认 grooming 建议 |
+| `confirm_grooming` | 确认 grooming 建议，可选 pool |
 | `list_pools` | 列出所有记忆池 |
 | `switch_pool` | 切换活跃记忆池 |
+| `transfer_memory` | 跨池迁移：`move` 保真迁移 + 源池留 TRANSFER 审计痕 / `copy` 双存 |
 
 ---
 

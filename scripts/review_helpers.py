@@ -38,7 +38,7 @@ RENEWAL_BASE_DAYS = 3
 MISSED_RUN_GRACE_HOURS = 2
 EXPECTED_RUN_HOUR = 9
 HOLIDAYS_FILE = os.path.join(REVIEW_DIR, 'holidays.yaml')
-DEFAULT_GIT_ROOT = os.path.expanduser('~/Desktop/h5_release')
+DEFAULT_GIT_ROOT = os.path.expanduser(os.getenv('MEMORY_REVIEW_GIT_ROOT', '~/projects'))
 _SETTINGS_FILES = (
     os.path.expanduser('~/.claude/settings.json'),
     os.path.expanduser('~/.claude/settings.local.json'),
@@ -50,7 +50,7 @@ _BASH_FIRST_TOKENS = frozenset({
     'ffprobe', 'ffmpeg', 'whisper', 'tesseract', 'cargo', 'brew', 'claude',
 })
 _LOCAL_CONFIG = os.path.join(os.path.dirname(__file__), 'review_helpers.local.json')
-ZCODE_DB = os.path.expanduser('~/.zcode/cli/db/db.sqlite')
+ZCODE_DB = os.path.expanduser(os.getenv('MEMORY_REVIEW_ZCODE_DB', '~/.zcode/cli/db/db.sqlite'))
 ZCODE_TRANSCRIPT_DIR = os.path.join(DATA_DIR, 'zcode-transcripts')
 # ZCode user 消息里 harness 注入内容的识别前缀（实测：TodoWrite 提醒不带 XML 标签）
 _ZCODE_INJECTED_PREFIXES = ('<system-reminder>', "The TodoWrite tool hasn't been used recently")
@@ -1278,7 +1278,7 @@ def main() -> int:
     p_git_log = sub.add_parser('git-log', help='扫描 git 仓库并按项目分组输出提交')
     p_git_log.add_argument('--since', required=True, help='扫描起点，如 "2026-06-24 11:50"')
     p_git_log.add_argument('--root', default=DEFAULT_GIT_ROOT, help='git 仓库根目录')
-    p_git_log.add_argument('--author', default='gaoyong', help='按作者过滤提交（git --author 匹配 name/email 子串）')
+    p_git_log.add_argument('--author', default=os.getenv('MEMORY_REVIEW_GIT_AUTHOR', ''), help='按作者过滤提交（git --author 匹配 name/email 子串，默认不过滤）')
     p_git_log.add_argument('--output', help='JSON 输出路径')
     p_git_log.add_argument('--markdown', help='Markdown 表格输出路径')
     p_git_log.set_defaults(func=cmd_git_log)

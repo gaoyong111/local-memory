@@ -362,14 +362,18 @@ def get_embedder_config() -> tuple[str, str]:
 def embed_text(text: str) -> list[float]:
     """Ollama embedding。"""
     model, base_url = get_embedder_config()
-    payload = json.dumps({'model': model, 'prompt': text}).encode()
+    # 用 /api/embed（返回归一化向量）；/api/embeddings 返回未归一化向量，
+    # 会使 chroma l2 距离爆炸、score=1-d/2 出负分
+    payload = json.dumps({'model': model, 'input': text}).encode()
     request = urllib.request.Request(
-        f'{base_url}/api/embeddings',
+        f'{base_url}/api/embed',
         data=payload,
         headers={'Content-Type': 'application/json'},
     )
     response = urllib.request.urlopen(request, timeout=30)
-    vector = json.loads(response.read()).get('embedding', [])
+    data = json.loads(response.read())
+    embeddings = data.get('embeddings') or []
+    vector = embeddings[0] if embeddings else []
     if not vector:
         raise RuntimeError('embedding 返回为空，请确认 Ollama 已启动')
     return vector

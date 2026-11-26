@@ -315,3 +315,149 @@ def format_pools_text(pools: list[PoolEntry] | None = None, root: Path | None = 
             + (f'\n    note: {row.note}' if row.note else '')
         )
     return '\n'.join(lines)
+
+
+def transfer_memory(
+    memory_id: str,
+    source_pool: str,
+    target_pool: str,
+    root: Path | None = None,
+    *,
+    mode: str = 'move',
+    reason: str = '',
+    actor: str = 'mcp',
+) -> dict[str, Any]:
+    """跨池转移单条记忆。
+
+    copy：写目标池（原 id/时间戳/向量/元数据），源池不动。
+    move：写目标池后物理删源池 sqlite+chroma，并删源池关联痕
+    （history.db 该 id 全部事件行、lineage.jsonl 该 id 全部旧条目、archive 不写行）；
+    源池 lineage 追加 1 条 TRANSFER 事件作审计痕。
+    """
+    import sqlite3
+
+    from memory_paths import workspace_pool_scope
+    from memory_lineage import record_event
+
+    root = root or resolve_memory_root()
+    registry = load_registry(root)
+    pools = registry.get('pools') or {}
+    if source_pool not in pools:
+        raise ValueError(f'源池不存在: {source_pool}')
+    if target_pool not in pools:
+        raise ValueError(f'目标池不存在: {target_pool}')
+    if source_pool == target_pool:
+        raise ValueError('源池与目标池相同')
+    mode = (mode or 'move').strip().lower()
+    if mode not in ('move', 'copy'):
+        raise ValueError(f'不支持的 mode: {mode}（仅 move/copy）')
+    memory_id = (memory_id or '').strip()
+    if not memory_id:
+        raise ValueError('memory_id 不能为空')
+
+    def _pool_db(pool_id: str, name: str) -> Path:
+        return Path(pools[pool_id]['path']) / name
+
+    def _chroma_col(pool_id: str):
+        # 走 hybrid_search 的按 path 缓存 client，避免与同进程其他 chroma 实例 settings 冲突
+        from hybrid_search import get_chroma_client
+        from memory_paths import get_chroma_collection
+        with workspace_pool_scope(pool_id):
+            return get_chroma_collection(get_chroma_client())
+
+    # ---- 读源 ----
+    with workspace_pool_scope(source_pool):
+        src_conn = sqlite3.connect(str(_pool_db(source_pool, 'active_memories.db')))
+        try:
+            row = src_conn.execute(
+                'SELECT memory_id, content, project, category, lang, created_at, updated_at '
+                'FROM active_memories WHERE memory_id = ?',
+                (memory_id,),
+            ).fetchone()
+        finally:
+            src_conn.close()
+        if not row:
+            raise ValueError(f'源池 {source_pool} 无此记忆: {memory_id}')
+        src_raw = _chroma_col(source_pool).get(ids=[memory_id], include=['metadatas', 'embeddings'])
+        if not src_raw.get('ids'):
+            raise ValueError(f'源池 {source_pool} chroma 无此记忆: {memory_id}')
+        src_meta = dict((src_raw.get('metadatas') or [{}])[0] or {})
+        embs = src_raw.get('embeddings')
+        src_emb = None if embs is None or len(embs) == 0 else embs[0]
+        content = row[1]
+
+    # ---- 写目标 ----
+    with workspace_pool_scope(target_pool):
+        dst_conn = sqlite3.connect(str(_pool_db(target_pool, 'active_memories.db')))
+        try:
+            if dst_conn.execute('SELECT 1 FROM active_memories WHERE memory_id = ?', (memory_id,)).fetchone():
+                raise ValueError(f'目标池 {target_pool} 已存在同 id 记忆: {memory_id}')
+            dst_conn.execute(
+                'INSERT INTO active_memories (memory_id, content, project, category, lang, created_at, updated_at) '
+                'VALUES (?,?,?,?,?,?,?)',
+                (memory_id, content, row[2] or '', row[3] or '', row[4] or 'zh', row[5], row[6]),
+            )
+            dst_conn.commit()
+        finally:
+            dst_conn.close()
+        col = _chroma_col(target_pool)
+        add_kwargs = {'ids': [memory_id], 'documents': [content], 'metadatas': [src_meta]}
+        if src_emb is not None:
+            add_kwargs['embeddings'] = [src_emb]
+        col.add(**add_kwargs)
+
+    # ---- move：物理删源 + 删关联痕 + 审计痕 ----
+    if mode == 'move':
+        with workspace_pool_scope(source_pool):
+            conn = sqlite3.connect(str(_pool_db(source_pool, 'active_memories.db')))
+            try:
+                conn.execute('DELETE FROM active_memories WHERE memory_id = ?', (memory_id,))
+                conn.commit()
+            finally:
+                conn.close()
+            _chroma_col(source_pool).delete(ids=[memory_id])
+
+            hist_path = _pool_db(source_pool, 'history.db')
+            hist = sqlite3.connect(str(hist_path))
+            try:
+                deleted_events = hist.execute(
+                    'DELETE FROM memory_events WHERE memory_id = ?', (memory_id,)
+                ).rowcount
+                hist.commit()
+            finally:
+                hist.close()
+
+            lineage_path = _pool_db(source_pool, 'lineage.jsonl')
+            removed_lineage = 0
+            if lineage_path.is_file():
+                kept = []
+                for raw in lineage_path.read_text(encoding='utf-8').splitlines():
+                    try:
+                        entry = json.loads(raw)
+                    except Exception:
+                        kept.append(raw)
+                        continue
+                    if entry.get('memory_id') == memory_id:
+                        removed_lineage += 1
+                    else:
+                        kept.append(raw)
+                if removed_lineage:
+                    lineage_path.write_text('\n'.join(kept) + '\n', encoding='utf-8')
+
+            record_event(
+                'TRANSFER',
+                memory_id,
+                note=f'transfer {source_pool} -> {target_pool} (mode={mode})'
+                     + (f'; reason: {reason}' if reason else '')
+                     + f'; purged: history={deleted_events}, lineage={removed_lineage}',
+                actor=actor,
+            )
+
+    return {
+        'memory_id': memory_id,
+        'source_pool': source_pool,
+        'target_pool': target_pool,
+        'mode': mode,
+        'content_length': len(content or ''),
+        'had_embedding': src_emb is not None,
+    }

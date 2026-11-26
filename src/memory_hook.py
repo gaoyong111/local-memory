@@ -7,6 +7,7 @@ import argparse
 import json
 import os
 import sys
+import time
 
 from hybrid_search import (
     HOOK_RESULTS_HEADER,
@@ -14,7 +15,40 @@ from hybrid_search import (
     format_results_lines,
     hybrid_search,
 )
+from memory_paths import resolve_runtime_dir
 from workspace_config import workspace_runtime
+
+
+def write_recall_debug(
+    query: str,
+    project: str,
+    results: list[dict],
+    dropped: list[dict],
+) -> None:
+    """MEMORY_HOOK_DEBUG=1 时写最近一次召回快照（可观测性，失败不影响 hook）。"""
+    try:
+        debug_path = resolve_runtime_dir() / 'last_recall.json'
+        os.makedirs(debug_path.parent, exist_ok=True)
+        payload = {
+            'ts': time.strftime('%Y-%m-%dT%H:%M:%S'),
+            'query': query[:200],
+            'project': project,
+            'injected': [
+                {
+                    'id': item.get('id', ''),
+                    'rank': item.get('rank'),
+                    'score': round(float(item.get('score', 0) or 0), 6),
+                    'source': item.get('source', ''),
+                    'recency_bonus': round(float(item.get('recency_bonus', 0) or 0), 6),
+                }
+                for item in results
+            ],
+            'dropped': dropped[:50],
+        }
+        with open(debug_path, 'w', encoding='utf-8') as handle:
+            json.dump(payload, handle, ensure_ascii=False, indent=2)
+    except Exception:
+        pass
 
 
 def extract_prompt(stdin_data: dict) -> str:
@@ -88,6 +122,8 @@ def main() -> None:
         return
 
     cwd = resolve_cwd(stdin_data)
+    debug_enabled = os.getenv('MEMORY_HOOK_DEBUG', '') == '1'
+    diagnostics: list[dict] = []
     with workspace_runtime(cwd) as config:
         project = detect_project(cwd, workspace_aliases=config.aliases or None)
         results = hybrid_search(
@@ -95,7 +131,11 @@ def main() -> None:
             project=project,
             max_results=5,
             read_projects=config.read_projects,
+            diagnostics_out=diagnostics if debug_enabled else None,
         )
+
+    if debug_enabled:
+        write_recall_debug(query, project, results, diagnostics)
 
     if not results:
         print('{}' if hook_format == 'cursor' else json.dumps({}))

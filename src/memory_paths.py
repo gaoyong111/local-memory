@@ -26,6 +26,15 @@ def workspace_pool_scope(pool_id: str | None) -> Iterator[None]:
         _workspace_pool.reset(token)
 
 
+def set_pool_context(pool_id: str | None):
+    """显式设置池上下文，返回 token 供 reset_pool_context 使用（跨 Flask 钩子场景）。"""
+    return _workspace_pool.set(pool_id)
+
+
+def reset_pool_context(token) -> None:
+    _workspace_pool.reset(token)
+
+
 def _expand(path: str | Path) -> Path:
     return Path(path).expanduser().resolve()
 

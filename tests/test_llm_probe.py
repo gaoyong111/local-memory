@@ -57,15 +57,15 @@ class AutoFollowTests(unittest.TestCase):
     @mock.patch('llm_client._read_session_llm_env')
     def test_auto_follow_overrides_session_model(self, mock_env) -> None:
         mock_env.return_value = {
-            'ANTHROPIC_BASE_URL': 'http://192.168.2.252:7080',
-            'ANTHROPIC_MODEL': 'deepseek-v4-flash',
+            'ANTHROPIC_BASE_URL': 'http://192.0.2.10:7080',
+            'ANTHROPIC_MODEL': 'test-model',
             'ANTHROPIC_AUTH_TOKEN': 'sk-test',
         }
         block = {
             'provider': 'anthropic',
             'auto_follow': True,
             'model': 'stale',
-            'base_url': 'http://192.168.2.252:6200',
+            'base_url': 'http://192.0.2.10:6200',
             'api_key_env': 'NEWAPI_KEY',
             'temperature': 0.1,
         }
@@ -73,8 +73,8 @@ class AutoFollowTests(unittest.TestCase):
         resolved = _apply_auto_follow(block)
 
         self.assertEqual(resolved['provider'], 'anthropic')
-        self.assertEqual(resolved['base_url'], 'http://192.168.2.252:7080')
-        self.assertEqual(resolved['model'], 'deepseek-v4-flash')
+        self.assertEqual(resolved['base_url'], 'http://192.0.2.10:7080')
+        self.assertEqual(resolved['model'], 'test-model')
         self.assertEqual(resolved['api_key'], 'sk-test')
         self.assertNotIn('api_key_env', resolved)
 
@@ -90,8 +90,8 @@ class AutoFollowTests(unittest.TestCase):
     @mock.patch('llm_client._read_session_llm_env')
     def test_auto_follow_partial_env_falls_back(self, mock_env) -> None:
         mock_env.return_value = {
-            'ANTHROPIC_BASE_URL': 'http://192.168.2.252:7080',
-            'ANTHROPIC_MODEL': 'deepseek-v4-flash',
+            'ANTHROPIC_BASE_URL': 'http://192.0.2.10:7080',
+            'ANTHROPIC_MODEL': 'test-model',
         }
         block = {'provider': 'anthropic', 'auto_follow': True, 'base_url': 'http://static', 'api_key': 'static-key'}
 
@@ -104,8 +104,8 @@ class AutoFollowTests(unittest.TestCase):
     @mock.patch('llm_client._read_config')
     def test_resolve_auto_follow_from_config(self, mock_read, mock_env) -> None:
         mock_env.return_value = {
-            'ANTHROPIC_BASE_URL': 'http://192.168.2.252:7080',
-            'ANTHROPIC_MODEL': 'deepseek-v4-flash',
+            'ANTHROPIC_BASE_URL': 'http://192.0.2.10:7080',
+            'ANTHROPIC_MODEL': 'test-model',
             'ANTHROPIC_AUTH_TOKEN': 'sk-test',
         }
         mock_read.return_value = {
@@ -115,8 +115,8 @@ class AutoFollowTests(unittest.TestCase):
 
         primary, fallback = _resolve_llm_configs()
 
-        self.assertEqual(primary.get('base_url'), 'http://192.168.2.252:7080')
-        self.assertEqual(primary.get('model'), 'deepseek-v4-flash')
+        self.assertEqual(primary.get('base_url'), 'http://192.0.2.10:7080')
+        self.assertEqual(primary.get('model'), 'test-model')
         self.assertEqual(fallback.get('base_url'), 'http://localhost:11434')
 
 

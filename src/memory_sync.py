@@ -35,7 +35,8 @@ CREATE TABLE IF NOT EXISTS active_memories (
     category TEXT NOT NULL DEFAULT '',
     lang TEXT NOT NULL DEFAULT 'zh',
     created_at TEXT NOT NULL,
-    updated_at TEXT NOT NULL
+    updated_at TEXT NOT NULL,
+    last_accessed_at REAL
 );
 CREATE INDEX IF NOT EXISTS idx_active_memories_project ON active_memories(project);
 """
@@ -159,10 +160,50 @@ def ensure_active_schema() -> None:
     conn = connect_db(_db(ACTIVE_DB))
     try:
         conn.executescript(_ACTIVE_SCHEMA)
+        # 存量库补列（CREATE IF NOT EXISTS 不会改已有表）
+        try:
+            conn.execute('ALTER TABLE active_memories ADD COLUMN last_accessed_at REAL')
+        except sqlite3.OperationalError as exc:
+            if 'duplicate column name' not in str(exc):
+                raise
         conn.commit()
     finally:
         conn.close()
     ensure_deleted_schema()
+
+
+def load_last_accessed(memory_ids: list[str]) -> dict[str, float | None]:
+    """批量读取 last_accessed_at（unix 秒，未命中过的 id 不在返回中）。"""
+    ensure_active_schema()
+    ids = [mid for mid in memory_ids if mid]
+    if not ids:
+        return {}
+    conn = connect_db(_db(ACTIVE_DB))
+    try:
+        placeholders = ','.join('?' * len(ids))
+        rows = conn.execute(
+            f'SELECT memory_id, last_accessed_at FROM active_memories WHERE memory_id IN ({placeholders})',
+            ids,
+        ).fetchall()
+    finally:
+        conn.close()
+    return {row[0]: row[1] for row in rows if row[0]}
+
+
+def touch_last_accessed(updates: list[tuple[str, float]]) -> None:
+    """批量写回折半后的 last_accessed_at。"""
+    ensure_active_schema()
+    if not updates:
+        return
+    conn = connect_db(_db(ACTIVE_DB))
+    try:
+        conn.executemany(
+            'UPDATE active_memories SET last_accessed_at = ? WHERE memory_id = ?',
+            [(ts, mid) for mid, ts in updates],
+        )
+        conn.commit()
+    finally:
+        conn.close()
 
 
 def _counts_match(op: str, actual: dict[str, int], *, phase: str = 'all') -> bool:

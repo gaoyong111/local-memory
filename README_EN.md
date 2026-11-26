@@ -14,13 +14,14 @@ Most AI assistants forget everything between sessions. local-memory gives your a
 
 | Capability | What you get |
 |------------|--------------|
-| **Hybrid search** | Keyword (SQLite) + vector (Chroma / bge-m3) fused with weighted RRF |
+| **Hybrid search** | Keyword (SQLite) + vector (Chroma / bge-m3) fused with weighted RRF, plus recency half-life boost |
 | **Verbatim storage** | What you write is what gets stored — no LLM rewriting on ingest |
-| **Write policies** | Category tags, structured formatting, LLM dedup on write |
+| **Write policies** | Category tags, structured formatting, LLM dedup on write, credential redaction (9 patterns → `[REDACTED:label]`) |
 | **Multi-pool** | Separate memory pools for work / personal / experiments |
+| **Agent identity** | Registered agents in the registry, each bound to a dedicated pool with cross-pool allowlists; writes carry agent identity and an unaudited flag |
 | **Workspace scoping** | Per-repo read/write rules via `.cursor/memory.json` |
 | **IDE integration** | MCP tools + prompt hooks for Cursor and Claude Code |
-| **Web UI** | `mem_viewer` for browse, search, edit, and episodic grooming |
+| **Web UI** | `mem_viewer` for browse, search, edit, episodic grooming, and cross-pool audit |
 
 ---
 
@@ -104,25 +105,28 @@ Full guide (code/data migration, client configuration, reverse-proxy notes, back
 
 **Project** — a logical tag on each memory (`""` = global, `"my-app"` = project-scoped). Used for filtering and retrieval bias.
 
+**Agent identity** — agents registered in `~/.memory/registry.json` are bound to pools (with `allowed_pools` allowlists); agent writes route automatically to the bound pool and carry an `audited=false` flag, auditable one by one in mem_viewer.
+
 **Workspace binding** — optional per-repo config that limits which projects a workspace can read/write.
 
 Details → [docs/architecture.md](docs/architecture.md) · [docs/v2-design.md](docs/v2-design.md)
 
 ---
 
-## MCP tools (9 total)
+## MCP tools (10 total)
 
 | Tool | Description |
 |------|-------------|
-| `add_memory` | Add memory with category metadata; runs dedup policy |
-| `search_memory` | Hybrid search, optional project filter |
+| `add_memory` | Add memory with category metadata; dedup policy + credential redaction on write. Registered agents may pass `agent` identity (writes to their bound pool, unaudited flag) and `target_pool` for allowlisted cross-pool writes |
+| `search_memory` | Hybrid search, optional project / pool filter |
 | `get_all_memories` | List memories, optional project filter |
-| `delete_memory` | Delete by ID (reason required) |
-| `retry_pending` | Retry failed writes / sync operations |
+| `delete_memory` | Delete by ID (reason required), optional `pool` for non-active pools |
+| `retry_pending` | Retry failed writes / syncs (routed back to the entry's original pool) |
 | `run_episodic_grooming` | Batch episodic quality review |
-| `confirm_grooming` | Confirm grooming suggestion |
+| `confirm_grooming` | Confirm grooming suggestion, optional `pool` |
 | `list_pools` | List all memory pools |
 | `switch_pool` | Switch the active memory pool |
+| `transfer_memory` | Cross-pool transfer: `move` (faithful migration + TRANSFER audit trail in source pool) or `copy` (kept in both) |
 
 ---
 

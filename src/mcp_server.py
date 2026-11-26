@@ -17,11 +17,14 @@ from hybrid_search import (
     normalize_project,
 )
 from llm_client import probe_llm_reachable
-from memory_paths import pending_dir
+from memory_paths import pending_dir, workspace_pool_scope
+from memory_paths import load_registry
 from memory_store import add, delete, get_all_memories as get_all_memories_from_store, retry_pending_entry
+from redact import redact
 from pool_manager import format_pools_text
 from pool_manager import list_pools as _list_pools
 from pool_manager import switch_pool as _switch_pool
+from pool_manager import transfer_memory as _transfer_memory
 from workspace_config import (
     check_write_access,
     filter_records_by_read_access,
@@ -69,16 +72,41 @@ def _optional_cwd(cwd: str) -> str | None:
 
 
 @mcp.tool()
-def add_memory(content: str, metadata: str = '', project: str = '', cwd: str = '') -> str:
+def add_memory(content: str, metadata: str = '', project: str = '', cwd: str = '', agent: str = '', target_pool: str = '') -> str:
     """添加一条记忆。
 
     content: 要记忆的内容（中文完整句，含模块名/字段名更易检索）
     metadata: 可选 JSON，例如 {"category":"reference","project":"your-project"}
     project: 项目标识；省略则 detect_project(cwd)
     cwd: 可选工作区路径，用于加载 .cursor/memory.json 读写权限
+    agent: 调用方身份（须在 registry.agents 登记）——写入自动路由到该 agent 绑定的池，
+        metadata 留身份痕并打未审计标记（audited=false）；省略则写当前活跃池
+    target_pool: 可选跨池写入目标池（仅限已登记 agent 且目标池在 agents[agent].allowed_pools 白名单内）
     """
     work_cwd = _optional_cwd(cwd)
     write_warning: str | None = None
+
+    agent_pool: str | None = None
+    if agent and agent.strip():
+        agent = agent.strip()
+        agents_reg = load_registry().get('agents') or {}
+        entry = agents_reg.get(agent)
+        if not entry:
+            return f'拒绝写入：agent「{agent}」未在 registry.agents 登记（身份校验）'
+        agent_pool = entry.get('pool') or 'default'
+
+    target_pool_id = target_pool.strip() if target_pool else ''
+    if target_pool_id:
+        if not agent:
+            return '拒绝写入：跨池写入仅限登记 agent，不带 agent 的调用禁止传 target_pool'
+        allowed_pools = (agents_reg.get(agent) or {}).get('allowed_pools') or []
+        if target_pool_id not in allowed_pools:
+            return f'拒绝写入：target_pool「{target_pool_id}」不在 agent「{agent}」的 allowed_pools 白名单内'
+        registry = load_registry()
+        if target_pool_id not in (registry.get('pools') or {}):
+            return f'拒绝写入：target_pool「{target_pool_id}」在 registry.pools 中不存在'
+
+    effective_pool = target_pool_id or agent_pool
 
     def _run_add(effective_project: str) -> str:
         nonlocal write_warning
@@ -90,6 +118,11 @@ def add_memory(content: str, metadata: str = '', project: str = '', cwd: str = '
                     meta = parsed
             except json.JSONDecodeError:
                 meta = {}
+        if agent:
+            meta['agent'] = agent
+            meta['written_by'] = agent
+            meta['source_pool'] = agent_pool or 'default'
+            meta['audited'] = False
 
         try:
             result = add(
@@ -100,8 +133,15 @@ def add_memory(content: str, metadata: str = '', project: str = '', cwd: str = '
             )
         except Exception as exc:
             logger.error('add 失败，写入 pending: %s', exc)
-            plan = prepare_add_plan(content, metadata, effective_project)
-            _write_to_pending(plan.content, plan.metadata, effective_project)
+            redacted_content, _ = redact(content)
+            plan = prepare_add_plan(redacted_content, metadata, effective_project)
+            pending_meta = dict(plan.metadata)
+            if agent:
+                pending_meta['agent'] = agent
+                pending_meta['written_by'] = agent
+                pending_meta['source_pool'] = agent_pool or 'default'
+                pending_meta['audited'] = False
+            _write_to_pending(plan.content, pending_meta, effective_project)
             return f'写入失败: {exc}。已存入待办队列({pending_dir()})，可用 retry_pending 重试。'
 
         if result.dropped:
@@ -121,38 +161,47 @@ def add_memory(content: str, metadata: str = '', project: str = '', cwd: str = '
             write_warning = check_write_access(effective_project, config.write_projects)
             if write_warning:
                 log_workspace_warning(write_warning)
-            return _run_add(effective_project)
+            with workspace_pool_scope(effective_pool):
+                return _run_add(effective_project)
 
     effective_project = project or detect_project()
-    return _run_add(effective_project)
+    with workspace_pool_scope(effective_pool):
+        return _run_add(effective_project)
 
 
 @mcp.tool()
-def search_memory(query: str, project: str = '', cwd: str = '') -> str:
-    """搜索记忆（关键词+向量混合检索）。cwd 可选，用于 workspace 读权限过滤。"""
+def search_memory(query: str, project: str = '', cwd: str = '', pool: str = '') -> str:
+    """搜索记忆（关键词+向量混合检索）。cwd 可选，用于 workspace 读权限过滤；pool 可选，指定检索的池（默认当前活跃池）。"""
     work_cwd = _optional_cwd(cwd)
 
-    if work_cwd:
-        with workspace_runtime(work_cwd) as config:
-            effective_project = normalize_project(project) or detect_project(
-                work_cwd,
-                workspace_aliases=config.aliases or None,
-            )
-            results = hybrid_search(
-                query,
-                project=effective_project,
-                max_results=DEFAULT_MAX_RESULTS,
-                read_projects=config.read_projects,
-            )
-            return format_mcp_search_output(results)
+    pool_id = pool.strip() if pool else ''
+    if pool_id:
+        registry = load_registry()
+        if pool_id not in (registry.get('pools') or {}):
+            return f'池不存在: {pool_id}（可用 list_pools 查看）'
 
-    effective_project = normalize_project(project) or detect_project()
-    results = hybrid_search(
-        query,
-        project=effective_project,
-        max_results=DEFAULT_MAX_RESULTS,
-    )
-    return format_mcp_search_output(results)
+    with workspace_pool_scope(pool_id or None):
+        if work_cwd:
+            with workspace_runtime(work_cwd) as config:
+                effective_project = normalize_project(project) or detect_project(
+                    work_cwd,
+                    workspace_aliases=config.aliases or None,
+                )
+                results = hybrid_search(
+                    query,
+                    project=effective_project,
+                    max_results=DEFAULT_MAX_RESULTS,
+                    read_projects=config.read_projects,
+                )
+                return format_mcp_search_output(results)
+
+        effective_project = normalize_project(project) or detect_project()
+        results = hybrid_search(
+            query,
+            project=effective_project,
+            max_results=DEFAULT_MAX_RESULTS,
+        )
+        return format_mcp_search_output(results)
 
 
 @mcp.tool()
@@ -181,12 +230,18 @@ def _format_memory_records(records) -> str:
 
 
 @mcp.tool()
-def delete_memory(memory_id: str, reason: str = '') -> str:
-    """删除记忆。reason 必填。"""
+def delete_memory(memory_id: str, reason: str = '', pool: str = '') -> str:
+    """删除记忆。reason 必填。pool 可选，指定删除的池（默认当前活跃池）。"""
     reason = (reason or '').strip()
     if not reason:
         return '删除失败：必须提供 reason（删除原因）'
-    result = delete(memory_id, reason, actor='mcp', source='delete_memory')
+    pool_id = pool.strip() if pool else ''
+    if pool_id:
+        registry = load_registry()
+        if pool_id not in (registry.get('pools') or {}):
+            return f'池不存在: {pool_id}（可用 list_pools 查看）'
+    with workspace_pool_scope(pool_id or None):
+        result = delete(memory_id, reason, actor='mcp', source='delete_memory')
     if result.ok:
         return f'已删除记忆 {memory_id}，原因：{reason}'
     return f'删除未完全同步（已写入 sync_pending）: {result.detail}'
@@ -207,6 +262,7 @@ def retry_pending() -> str:
     fail_count = 0
     alert_count = 0
     manual_review: list[str] = []
+    agents_reg = load_registry().get('agents') or {}
 
     for filename in files:
         filepath = os.path.join(pdir, filename)
@@ -221,7 +277,10 @@ def retry_pending() -> str:
         payload.pop('use_infer', None)
 
         try:
-            retry_pending_entry(payload)
+            agent_id = str((payload.get('metadata') or {}).get('agent') or '')
+            agent_pool = (agents_reg.get(agent_id) or {}).get('pool') if agent_id else None
+            with workspace_pool_scope(agent_pool):
+                retry_pending_entry(payload)
             os.remove(filepath)
             success_count += 1
         except Exception as exc:
@@ -267,35 +326,41 @@ def run_episodic_grooming(all_episodic: bool = False, dry_run: bool = False) -> 
 
 
 @mcp.tool()
-def confirm_grooming(memory_id: str) -> str:
-    """确认 episodic 梳理建议（清除 grooming_pending，不改正文）。"""
+def confirm_grooming(memory_id: str, pool: str = '') -> str:
+    """确认 episodic 梳理建议（清除 grooming_pending，不改正文）。pool 可选，指定记忆所在池（默认当前活跃池）。"""
+    pool_id = pool.strip() if pool else ''
+    if pool_id:
+        registry = load_registry()
+        if pool_id not in (registry.get('pools') or {}):
+            return f'池不存在: {pool_id}（可用 list_pools 查看）'
     try:
         from grooming_metadata import clear_grooming_pending, is_grooming_pending, parse_grooming_fields
         from hybrid_search import get_chroma_client, get_chroma_collection
         from memory_lineage import record_event
 
-        col = get_chroma_collection(get_chroma_client())
-        raw = col.get(ids=[memory_id], include=['metadatas'])
-        if not raw.get('ids'):
-            return f'记忆不存在: {memory_id}'
+        with workspace_pool_scope(pool_id or None):
+            col = get_chroma_collection(get_chroma_client())
+            raw = col.get(ids=[memory_id], include=['metadatas'])
+            if not raw.get('ids'):
+                return f'记忆不存在: {memory_id}'
 
-        meta = dict((raw.get('metadatas') or [{}])[0] or {})
-        if not is_grooming_pending(meta):
-            grooming = parse_grooming_fields(meta)
-            return f'记忆 {memory_id} 无待确认标记。当前建议: {grooming.get("action") or "无"}'
+            meta = dict((raw.get('metadatas') or [{}])[0] or {})
+            if not is_grooming_pending(meta):
+                grooming = parse_grooming_fields(meta)
+                return f'记忆 {memory_id} 无待确认标记。当前建议: {grooming.get("action") or "无"}'
 
-        clear_grooming_pending(meta)
-        clean = {
-            key: value for key, value in meta.items()
-            if isinstance(value, (str, int, float, bool))
-        }
-        col.update(ids=[memory_id], metadatas=[clean])
-        record_event(
-            'GROOMING',
-            memory_id,
-            note='MCP 确认保留（清除待确认标记）',
-            actor='mcp',
-        )
+            clear_grooming_pending(meta)
+            clean = {
+                key: value for key, value in meta.items()
+                if isinstance(value, (str, int, float, bool))
+            }
+            col.update(ids=[memory_id], metadatas=[clean])
+            record_event(
+                'GROOMING',
+                memory_id,
+                note='MCP 确认保留（清除待确认标记）',
+                actor='mcp',
+            )
         return f'已确认记忆 {memory_id}，待确认标记已清除'
     except Exception as exc:
         return f'确认失败: {exc}'
@@ -315,6 +380,20 @@ def switch_pool(pool_id: str) -> str:
     except ValueError as exc:
         return f'切换失败: {exc}'
     return f'已切换 active pool → {pool_id}\n\n{format_pools_text()}'
+
+
+@mcp.tool()
+def transfer_memory(memory_id: str, source_pool: str, target_pool: str, mode: str = 'move', reason: str = '') -> str:
+    """跨池转移记忆。mode: move=迁移（删源池条目及其历史/演变关联痕，留 1 条 TRANSFER 审计痕）/ copy=复制（源不动，检索会双命中）。reason 建议填写转移原因。"""
+    try:
+        result = _transfer_memory(memory_id, source_pool, target_pool, mode=mode, reason=reason, actor='mcp')
+    except ValueError as exc:
+        return f'转移失败: {exc}'
+    return (
+        f"已{('迁移' if result['mode'] == 'move' else '复制')}记忆 {result['memory_id']} "
+        f"{result['source_pool']} → {result['target_pool']} "
+        f"(正文 {result['content_length']} 字, 向量{'已带' if result['had_embedding'] else '缺失'})"
+    )
 
 
 def _build_http_asgi_app():

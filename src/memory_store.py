@@ -17,6 +17,7 @@ from hybrid_search import detect_project, hybrid_search, normalize_project
 from llm_client import embed_text, get_llm_client
 from memory_lineage import parse_merged_from, record_merge_result
 from memory_paths import DEFAULT_USER, pending_dir
+from redact import redact
 from memory_sync import (
     ensure_active_schema,
     ensure_history_schema,
@@ -93,7 +94,7 @@ def _chroma_upsert(memory_id: str, content: str, metadata: dict[str, Any]) -> No
     })
     embedding = embed_text(content)
     col = get_chroma_collection(get_chroma_client())
-    col.upsert(ids=[memory_id], embeddings=[embedding], metadatas=[chroma_meta])
+    col.upsert(ids=[memory_id], documents=[content], embeddings=[embedding], metadatas=[chroma_meta])
 
 
 def _write_pending(content: str, metadata: dict, project: str) -> str:
@@ -124,6 +125,10 @@ def add(
 ) -> AddResult:
     del pool
     ensure_pool_schema()
+
+    content, redact_hits = redact(content)
+    if redact_hits:
+        logger.warning('add 命中脱敏规则: %s', ','.join(redact_hits))
 
     metadata_raw = json.dumps(metadata or {}, ensure_ascii=False)
     effective_project = project or detect_project()

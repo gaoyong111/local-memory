@@ -1,5 +1,6 @@
 """local-memory 记忆可视化 Web UI — Flask + vis.js Network 图谱驱动"""
 
+import functools
 import hashlib
 import json
 import os
@@ -16,7 +17,7 @@ _RUNTIME_DIR = os.path.dirname(os.path.abspath(__file__))
 if _RUNTIME_DIR not in sys.path:
     sys.path.insert(0, _RUNTIME_DIR)
 
-from memory_paths import ACTIVE_DB, HISTORY_DB
+from memory_paths import load_registry, resolve_pool_path, reset_pool_context, set_pool_context, workspace_pool_scope
 from hybrid_search import (
     detect_project,
     extract_keywords,
@@ -56,7 +57,21 @@ VIEWER_WORKSPACE_ROOT = os.getenv('WORKSPACE_ROOT') or None
 # 与 mcp_server.py DEFAULT_MAX_RESULTS 保持一致，便于对比检索效果
 MCP_SEARCH_MAX_RESULTS = 8
 _chroma_collection = None
+_chroma_collection_pool: str | None = None
+_current_pool: str | None = None  # None = registry.active_pool；viewer 内全局切换
 _viewer_workspace_config = None
+
+
+def _current_pool_id() -> str:
+    return _current_pool or (load_registry().get('active_pool') or 'default')
+
+
+def _active_db():
+    return resolve_pool_path(_current_pool_id()) / 'active_memories.db'
+
+
+def _history_db():
+    return resolve_pool_path(_current_pool_id()) / 'history.db'
 
 
 def _bootstrap_viewer_workspace():
@@ -99,32 +114,49 @@ def _load_chroma_grooming_fields() -> dict[str, dict]:
     for memory_id, meta in zip(ids, metas):
         if not meta:
             continue
-        grooming_map[memory_id] = parse_grooming_fields(meta)
+        entry = parse_grooming_fields(meta)
+        entry['agent'] = str(meta.get('agent', '') or '')
+        # 无 audited 键 = agent 机制上线前的存量记忆 = 已审计；false 仅由 agent 写入时显式打标
+        entry['audited'] = bool(meta.get('audited', True))
+        entry['merged_from'] = parse_merged_from(meta)
+        grooming_map[memory_id] = entry
     return grooming_map
 
 
 def load_all_memories() -> list[dict]:
-    """从 active_memories + Chroma 加载全部活跃记忆。"""
-    from memory_sync import load_active_memories, load_active_metadata, migrate_active_if_needed
+    """从当前池的 active_memories + Chroma 加载全部活跃记忆。
 
-    migrate_active_if_needed()
-    text_map = load_active_memories()
-    metadata_map = load_active_metadata()
+    直连 _active_db()/_history_db() 显式池路径——memory_sync 用 import 时常量，
+    不随 viewer 的池切换路由，此处不能走它。
+    """
+    text_map: dict[str, str] = {}
+    metadata_map: dict[str, dict] = {}
+    created_at_map: dict[str, str] = {}
+    updated_at_map: dict[str, str] = {}
+    conn = sqlite3.connect(str(_active_db()))
+    try:
+        rows = conn.execute(
+            'SELECT memory_id, content, project, category, lang, created_at, updated_at FROM active_memories'
+        ).fetchall()
+    finally:
+        conn.close()
+    for memory_id, content, project, category, lang, created_at, updated_at in rows:
+        if not memory_id or not (content or '').strip():
+            continue
+        text_map[memory_id] = content
+        metadata_map[memory_id] = {
+            'project': project or '',
+            'category': category or '',
+            'lang': lang or 'zh',
+        }
+        created_at_map[memory_id] = created_at or updated_at or ''
+        updated_at_map[memory_id] = updated_at or created_at or ''
+
     grooming_map = _load_chroma_grooming_fields()
     merge_hints_payload = read_merge_hints()
 
-    created_at_map: dict[str, str] = {}
-    conn = sqlite3.connect(str(ACTIVE_DB))
-    try:
-        for memory_id, created_at, updated_at in conn.execute(
-            'SELECT memory_id, created_at, updated_at FROM active_memories'
-        ):
-            created_at_map[memory_id] = created_at or updated_at or ''
-    finally:
-        conn.close()
-
     update_count_map: dict[str, int] = {}
-    conn = sqlite3.connect(str(HISTORY_DB))
+    conn = sqlite3.connect(str(_history_db()))
     try:
         if conn.execute(
             "SELECT name FROM sqlite_master WHERE type='table' AND name='memory_events'"
@@ -163,9 +195,13 @@ def load_all_memories() -> list[dict]:
             'category_label': CATEGORY_LABELS.get(normalized_category, normalized_category),
             'metadata': meta,
             'created_at': created_at_map.get(memory_id, ''),
+            'updated_at': updated_at_map.get(memory_id, ''),
             'update_count': update_count_map.get(memory_id, 0),
             'grooming': grooming,
             'merge_hint': merge_hint,
+            'agent': grooming.get('agent', ''),
+            'audited': grooming.get('audited', None),
+            'merged_from': grooming.get('merged_from', []),
         })
 
     return memories
@@ -318,6 +354,9 @@ def compute_edges(memories: list[dict]) -> list[dict]:
         if created and m['project']:
             try:
                 ts = datetime.fromisoformat(created.replace('Z', '+00:00'))
+                # 历史数据 naive(本地)/aware(UTC) 并存，混排会 TypeError；aware 先转本地再统一丢时区，保证同语义比较
+                if ts.tzinfo is not None:
+                    ts = ts.astimezone().replace(tzinfo=None)
                 project_sorted[m['project']].append((ts, m['id']))
             except (ValueError, TypeError):
                 pass
@@ -344,11 +383,14 @@ def compute_edges(memories: list[dict]) -> list[dict]:
 
 
 def _get_chroma_collection():
-    """进程内单例 Chroma collection，复用 hybrid_search 共享客户端。"""
-    global _chroma_collection
-    if _chroma_collection is not None:
+    """进程内 Chroma collection 单例（按池缓存），复用 hybrid_search 共享客户端。"""
+    global _chroma_collection, _chroma_collection_pool
+    pool_id = _current_pool_id()
+    if _chroma_collection is not None and _chroma_collection_pool == pool_id:
         return _chroma_collection
-    _chroma_collection = get_chroma_collection(get_chroma_client())
+    with workspace_pool_scope(pool_id):
+        _chroma_collection = get_chroma_collection(get_chroma_client())
+    _chroma_collection_pool = pool_id
     return _chroma_collection
 
 
@@ -623,9 +665,23 @@ def execute_grooming_merge(source_id: str, hinted_target_id: str = '') -> dict:
     }
 
 
-from flask import Flask, jsonify, render_template_string, request, url_for  # noqa: E402
+from flask import Flask, g, jsonify, render_template_string, request, url_for  # noqa: E402
 
 app = Flask(__name__)
+
+
+@app.before_request
+def _viewer_enter_pool_context():
+    """请求级池路由：viewer 的读写（含写路径 sqlite/lineage）统一跟随当前选中池。"""
+    g._pool_ctx_token = set_pool_context(_current_pool_id())
+
+
+@app.teardown_request
+def _viewer_exit_pool_context(exc):
+    token = getattr(g, '_pool_ctx_token', None)
+    if token is not None:
+        reset_pool_context(token)
+        g._pool_ctx_token = None
 
 # 本地静态文件（src/static/vendor/），替代原 unpkg CDN（2026-09-02：CDN 加载失败改本地）
 VIS_JS_STATIC = 'vendor/vis-network.min.js'
@@ -736,6 +792,9 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
   .detail-text { font-size:14px; line-height:1.6; white-space:pre-wrap; }
   .detail-meta { font-size:12px; color:#95a5a6; }
   .timeline-hint { font-size:11px; color:#7f8c8d; margin-bottom:4px; }
+  .audit-badge { display:inline-block; padding:1px 6px; border-radius:3px; background:#8e44ad; color:#fff; font-size:11px; }
+  .lineage-badge { display:inline-block; padding:1px 6px; border-radius:3px; background:#0e6655; color:#fff; font-size:11px; }
+  .pool-readonly-banner { padding:6px 14px; background:#4a3b10; color:#f1c40f; font-size:12px; border-bottom:1px solid #0f3460; }
   .timeline-list { list-style:none; padding:0; margin:4px 0 0; }
   .merge-sources { margin-top:4px; }
   .merge-sources-empty { font-size:12px; color:#95a5a6; }
@@ -856,7 +915,16 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
   </div>
 </div>
 
+{% if current_pool_id != active_pool_id %}
+<div class="pool-readonly-banner">🔒 当前浏览「{{ current_pool_id }}」池（只读浏览）：写路径尚未池化，新增 / 编辑 / 梳理拍板请切回「{{ active_pool_id }}」池</div>
+{% endif %}
+
 <div class="toolbar">
+  <select id="pool-switch" onchange="switchPool(this.value)" title="切换记忆池（全局）">
+    {% for pool in pools_items %}
+    <option value="{{ pool.id }}" {% if pool.active %}selected{% endif %}>◆ {{ pool.id }}{% if pool.active %}（当前）{% endif %}</option>
+    {% endfor %}
+  </select>
   <input type="text" id="search-input" placeholder="搜索记忆..." />
   <select id="project-filter">
     <option value="">全部项目</option>
@@ -1000,6 +1068,11 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
         <div class="grooming-actions" id="grooming-actions"></div>
       </div>
     </div>
+    <div class="detail-section" id="audit-section" style="display:none">
+      <div class="detail-label">审计状态 <span id="audit-badge" class="grooming-pending-badge" style="display:none">未审计</span></div>
+      <div class="detail-meta" id="audit-meta"></div>
+      <div class="grooming-actions" id="audit-actions"></div>
+    </div>
     <div class="detail-section">
       <div class="detail-label">演变时间线</div>
       <div class="detail-meta timeline-hint">合并来源：展示并入本条的原记忆正文；若来源本身由合并产生会继续展开</div>
@@ -1109,8 +1182,54 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
     document.getElementById('detail-id').textContent = id;
     document.getElementById('detail-panel').classList.add('visible');
     renderGroomingPanel(mem);
+    renderAuditPanel(mem);
     loadTimeline(id);
     updateMemoryListHighlight();
+  }
+
+  function renderAuditPanel(mem) {
+    const section = document.getElementById('audit-section');
+    const badge = document.getElementById('audit-badge');
+    const metaEl = document.getElementById('audit-meta');
+    const actionsEl = document.getElementById('audit-actions');
+    const audited = mem.audited !== false;  // 无标记的存量记忆视为已审计
+    const agent = mem.agent || '';
+    section.style.display = '';
+    badge.style.display = audited ? 'none' : 'inline-block';
+    metaEl.textContent = audited
+      ? '已审计' + (agent ? ' · 写入方: ' + agent : '')
+      : '未审计（agent 写入即生效，人工确认后消除标记）' + (agent ? ' · 写入方: ' + agent : '');
+    if (!audited) {
+      actionsEl.innerHTML = '<button class="btn-grooming-confirm" onclick="auditMemory(\\'' + mem.id + '\\')">确认审计</button>';
+    } else {
+      actionsEl.innerHTML = '';
+    }
+  }
+
+  function auditMemory(id) {
+    fetch('/api/audit/' + id, { method: 'POST' })
+      .then(r => r.json())
+      .then(d => {
+        if (d.ok) {
+          if (memoriesMap[id]) memoriesMap[id].audited = true;
+          renderAuditPanel(memoriesMap[id]);
+          renderMemoryList();
+        } else {
+          alert('审计失败: ' + (d.error || '未知错误'));
+        }
+      })
+      .catch(e => alert('审计失败: ' + e));
+  }
+
+  function switchPool(poolId) {
+    fetch('/api/switch_pool', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pool: poolId })
+    })
+      .then(r => r.json())
+      .then(d => { if (d.ok) window.location.reload(); else alert('切换失败: ' + (d.error || '未知错误')); })
+      .catch(e => alert('切换失败: ' + e));
   }
 
   function renderGroomingPanel(mem) {
@@ -2182,7 +2301,7 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
       const matchSet = new Set(lastSearchResults.map(item => item.id));
       items = items.filter(mem => matchSet.has(mem.id));
     }
-    return items.sort((a, b) => String(a.created_at || '').localeCompare(String(b.created_at || '')));
+    return items.sort((a, b) => String(b.updated_at || b.created_at || '').localeCompare(String(a.updated_at || a.created_at || '')));
   }
 
   function groomingActionBadgeHtml(mem) {
@@ -2225,6 +2344,8 @@ HTML_TEMPLATE = '''<!DOCTYPE html>
       const text = mem.text.length > 46 ? mem.text.slice(0, 46) + '...' : mem.text;
       let metaHtml = '<span>' + (mem.category || 'episodic') + '</span>';
       if (mem.project) metaHtml += '<span>' + mem.project + '</span>';
+      if (mem.audited === false) metaHtml += ' · <span class="audit-badge">未审计</span>';
+      if (mem.merged_from && mem.merged_from.length) metaHtml += ' · <span class="lineage-badge" title="有合并来源，详情可看演变时间线">有演变</span>';
       if (mem.grooming && mem.grooming.pending) metaHtml += ' · ' + groomingActionBadgeHtml(mem);
       else if (mem.grooming && (mem.grooming.action === 'delete' || mem.grooming.action === 'promote')) metaHtml += ' · ' + groomingActionBadgeHtml(mem);
       else if (mem.merge_hint) metaHtml += ' · ' + groomingActionBadgeHtml(mem);
@@ -2560,6 +2681,13 @@ def index():
     category_colors_json = json.dumps(CATEGORY_COLORS, ensure_ascii=False)
     merge_hints_json = json.dumps(merge_hints_payload, ensure_ascii=False)
 
+    current_pool = _current_pool_id()
+    active_pool_id = load_registry().get('active_pool') or 'default'
+    pools_items = [
+        {'id': pool_id, 'active': pool_id == current_pool}
+        for pool_id in (load_registry().get('pools') or {})
+    ]
+
     return render_template_string(
         HTML_TEMPLATE,
         nodes_json=nodes_json,
@@ -2575,13 +2703,66 @@ def index():
         vis_js_src=url_for('static', filename=VIS_JS_STATIC),
         global_color=_GLOBAL_COLOR,
         mcp_search_max_results=MCP_SEARCH_MAX_RESULTS,
+        pools_items=pools_items,
+        current_pool_id=current_pool,
+        active_pool_id=active_pool_id,
     )
+
+
+def require_active_pool(fn):
+    """写路径护栏：memory_sync/lineage 用 import 时常量，写操作无法随 viewer 池切换路由，
+    非 active 池浏览时直接拒绝（拒绝优于写撕裂）。"""
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        active_pool = load_registry().get('active_pool') or 'default'
+        current = _current_pool_id()
+        if current != active_pool:
+            return jsonify({
+                'ok': False,
+                'error': f'当前浏览池「{current}」为只读浏览：写路径尚未池化，请切回「{active_pool}」再执行写操作',
+            }), 403
+        return fn(*args, **kwargs)
+    return wrapper
 
 
 @app.route('/api/timeline/<memory_id>')
 def timeline(memory_id: str):
     """返回记忆的演变时间线（history.db + lineage.jsonl）及上游 ID。"""
     return jsonify(build_timeline(memory_id))
+
+
+@app.route('/api/pools')
+def api_pools():
+    registry = load_registry()
+    current = _current_pool_id()
+    pools = [
+        {'id': pool_id, 'active': pool_id == current}
+        for pool_id in (registry.get('pools') or {})
+    ]
+    return jsonify({'current': current, 'pools': pools})
+
+
+@app.route('/api/switch_pool', methods=['POST'])
+def api_switch_pool():
+    pool_id = str((request.get_json(silent=True) or {}).get('pool', '') or '')
+    registry = load_registry()
+    if pool_id not in (registry.get('pools') or {}):
+        return jsonify({'ok': False, 'error': f'池不存在: {pool_id}'}), 400
+    global _current_pool, _chroma_collection, _chroma_collection_pool
+    _current_pool = pool_id
+    _chroma_collection = None
+    _chroma_collection_pool = None
+    return jsonify({'ok': True, 'current': pool_id})
+
+
+@app.route('/api/audit/<memory_id>', methods=['POST'])
+def api_audit(memory_id: str):
+    """人工审计确认：置 audited=true（先写后审计模型的人工闸门）。"""
+    meta = _read_chroma_meta(memory_id)
+    meta['audited'] = True
+    _write_chroma_meta(memory_id, meta)
+    record_event('AUDIT', memory_id, note='viewer 人工审计确认', actor='mem_viewer')
+    return jsonify({'ok': True, 'audited': True})
 
 
 @app.route('/search')
@@ -2733,6 +2914,7 @@ def similar_memories():
 
 
 @app.route('/api/add', methods=['POST'])
+@require_active_pool
 def add_memory_route():
     """viewer 手动新增记忆。"""
     body = request.get_json(silent=True) or {}
@@ -2754,6 +2936,7 @@ def add_memory_route():
 
 
 @app.route('/api/update/<memory_id>', methods=['POST'])
+@require_active_pool
 def update_memory(memory_id: str):
     """更新记忆：正文扩写（重嵌向量）或 project/category（仅 metadata）。"""
     body = request.get_json(silent=True) or {}
@@ -2818,6 +3001,7 @@ def update_memory(memory_id: str):
 
 
 @app.route('/api/grooming/confirm/<memory_id>', methods=['POST'])
+@require_active_pool
 def grooming_confirm(memory_id: str):
     """确认保留：仅清 grooming_pending。"""
     try:
@@ -2830,6 +3014,7 @@ def grooming_confirm(memory_id: str):
 
 
 @app.route('/api/grooming/promote/<memory_id>', methods=['POST'])
+@require_active_pool
 def grooming_promote(memory_id: str):
     """采纳升类建议。"""
     try:
@@ -2843,6 +3028,7 @@ def grooming_promote(memory_id: str):
 
 
 @app.route('/api/grooming/merge/<source_id>', methods=['POST'])
+@require_active_pool
 def grooming_merge(source_id: str):
     """合并（重校验）。"""
     body = request.get_json(silent=True) or {}
@@ -2857,6 +3043,7 @@ def grooming_merge(source_id: str):
 
 
 @app.route('/api/grooming/batch', methods=['POST'])
+@require_active_pool
 def grooming_batch():
     """批量操作：action ∈ confirm | promote。delete 不提供批量。"""
     body = request.get_json(silent=True) or {}
@@ -2889,6 +3076,7 @@ def grooming_batch():
 
 
 @app.route('/delete/<memory_id>', methods=['POST'])
+@require_active_pool
 def delete(memory_id):
     """删除记忆：memory_sync 多表事务 + Chroma。"""
     from memory_delete import archive_delete

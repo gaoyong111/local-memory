@@ -6,6 +6,7 @@ import json
 import os
 import re
 import sqlite3
+import time
 import urllib.request
 from typing import Any
 
@@ -45,6 +46,12 @@ PROJECT_QUOTA_TOP = 3
 PROJECT_QUOTA_MIN_RRF = 0.03
 GLOBAL_QUOTA_MIN = 2
 
+# recency「回血一半」（借鉴 familiar-memory）：命中记忆按等效时间衰减加分，
+# 命中后等效时间戳向 now 折半推进——bonus 有 MAX 硬上限，无频次累加式马太效应
+RECENCY_BONUS_MAX = 0.006
+RECENCY_HALF_LIFE_DAYS = 30.0
+DAY_SECONDS = 86400.0
+
 # Phase 3 lang 分轨：中文 query 排除纯英文记忆
 _CJK_RE = re.compile(r'[一-鿿]')
 LANG_VECTOR_OVERSAMPLE = 4
@@ -81,22 +88,22 @@ def _load_config() -> dict[str, Any]:
         return json.load(config_file)
 
 
-_CHROMA_CLIENT = None
+_CHROMA_CLIENT: dict[str, Any] = {}
 
 
 def get_chroma_client() -> Any:
-    """返回共享的 Chroma 客户端（PersistentClient，多进程可共存读写在 SQLite 锁下串行）。"""
-    global _CHROMA_CLIENT
-    if _CHROMA_CLIENT is not None:
-        return _CHROMA_CLIENT
-    import chromadb
-    from chromadb.config import Settings
+    """返回共享的 Chroma 客户端，按 chroma_db 路径缓存——CHROMA_DB_PATH 随池上下文
+    （ContextVar/env/active）解析，单例跨池缓存会把 A 池的 client 用于 B 池的读写。"""
+    path = str(CHROMA_DB_PATH)
+    if path not in _CHROMA_CLIENT:
+        import chromadb
+        from chromadb.config import Settings
 
-    _CHROMA_CLIENT = chromadb.PersistentClient(
-        path=str(CHROMA_DB_PATH),
-        settings=Settings(anonymized_telemetry=False),
-    )
-    return _CHROMA_CLIENT
+        _CHROMA_CLIENT[path] = chromadb.PersistentClient(
+            path=path,
+            settings=Settings(anonymized_telemetry=False),
+        )
+    return _CHROMA_CLIENT[path]
 
 
 def get_chroma_collection(client: Any | None = None) -> Any:
@@ -336,6 +343,7 @@ def keyword_search(
     *,
     filter_lang_en: bool = False,
     vec_rank_map: dict[str, int] | None = None,
+    dropped: list | None = None,
 ) -> list[dict[str, Any]]:
     """关键词匹配活跃记忆；4G 子序列依赖 vec_rank_map（须先 vector_search）。"""
     keywords = extract_keywords(query)
@@ -352,6 +360,7 @@ def keyword_search(
     for memory_id, text in final_memories.items():
         meta = metadata_map.get(memory_id, {})
         if filter_lang_en and should_exclude_lang_en(query, text, meta.get('lang', '')):
+            _record_drop(dropped, {'id': memory_id}, 'lang_en', '中文query排除en记忆')
             continue
 
         score = _keyword_score_for_memory(
@@ -377,13 +386,24 @@ def keyword_search(
         })
 
     scored.sort(key=lambda item: item['score'], reverse=True)
-    scored = _apply_keyword_relative_cutoff(scored)
+    scored = _apply_keyword_relative_cutoff(scored, dropped=dropped)
     return scored[:top_k]
+
+
+def _record_drop(dropped: list | None, item: dict[str, Any], stage: str, reason: str) -> None:
+    if dropped is not None:
+        dropped.append({
+            'id': item.get('id', ''),
+            'stage': stage,
+            'reason': reason,
+            'score': float(item.get('score', 0) or 0),
+        })
 
 
 def _apply_keyword_relative_cutoff(
     results: list[dict[str, Any]],
     ratio: float | None = None,
+    dropped: list | None = None,
 ) -> list[dict[str, Any]]:
     """4D：kw_score < top1 × ratio 截断，弱命中不进 RRF（kw_rank=0）。至少保留 top1。"""
     rel_ratio = KW_RELATIVE_RATIO if ratio is None else ratio
@@ -399,12 +419,21 @@ def _apply_keyword_relative_cutoff(
         item for item in results
         if float(item.get('keyword_score', item.get('score', 0)) or 0) >= cutoff
     ]
-    return filtered if filtered else results[:1]
+    if filtered:
+        kept_ids = {item['id'] for item in filtered}
+    else:
+        filtered = results[:1]
+        kept_ids = {item['id'] for item in filtered}
+    for item in results:
+        if item['id'] not in kept_ids:
+            _record_drop(dropped, item, 'keyword_cutoff', f'kw_score<{cutoff:.2f}')
+    return filtered
 
 
 def _apply_vector_relative_threshold(
     results: list[dict[str, Any]],
     margin: float | None = None,
+    dropped: list | None = None,
 ) -> list[dict[str, Any]]:
     """按 top1 - δ 截断向量路：低于阈值的条目不进 RRF（vec_rank=0）。至少保留 top1。"""
     delta = VECTOR_SCORE_REL_MARGIN if margin is None else margin
@@ -415,7 +444,15 @@ def _apply_vector_relative_threshold(
     top_score = float(results[0].get('vector_score', results[0].get('score', 0)) or 0)
     cutoff = top_score - delta
     filtered = [item for item in results if float(item.get('vector_score', item.get('score', 0)) or 0) >= cutoff]
-    return filtered if filtered else results[:1]
+    if filtered:
+        kept_ids = {item['id'] for item in filtered}
+    else:
+        filtered = results[:1]
+        kept_ids = {item['id'] for item in filtered}
+    for item in results:
+        if item['id'] not in kept_ids:
+            _record_drop(dropped, item, 'vector_threshold', f'vec_score<{cutoff:.3f}')
+    return filtered
 
 
 def vector_search(
@@ -423,6 +460,7 @@ def vector_search(
     top_k: int = DEFAULT_TOP_K,
     *,
     filter_lang_en: bool = False,
+    dropped: list | None = None,
 ) -> list[dict[str, Any]]:
     """Ollama embedding + Chroma 向量检索。"""
     try:
@@ -458,6 +496,7 @@ def vector_search(
         for index in range(len(ids_list[0]) if ids_list and ids_list[0] else 0):
             memory_id = ids_list[0][index]
             if memory_id in deleted_ids:
+                _record_drop(dropped, {'id': memory_id}, 'deleted', '已删除')
                 continue
             meta = metas_list[0][index] if index < len(metas_list[0]) else {}
             distance = dists_list[0][index] if index < len(dists_list[0]) else 1.0
@@ -468,6 +507,7 @@ def vector_search(
 
             lang = resolve_memory_lang(data_text, str((meta or {}).get('lang', '') or ''))
             if filter_lang_en and lang == 'en':
+                _record_drop(dropped, {'id': memory_id, 'score': score}, 'lang_en', '中文query排除en记忆')
                 continue
 
             results.append({
@@ -484,7 +524,7 @@ def vector_search(
             if len(results) >= n_results:
                 break
 
-        results = _apply_vector_relative_threshold(results)
+        results = _apply_vector_relative_threshold(results, dropped=dropped)
         return results[:top_k]
     except Exception:
         return []
@@ -536,6 +576,52 @@ def _apply_result_bonuses(merged: list[dict[str, Any]], project: str = '') -> No
         item['project_bonus'] = project_bonus
         item['preference_bonus'] = preference_bonus
         item['score'] = rrf_score + project_bonus + preference_bonus
+
+
+def recency_bonus(last_ts: float | None) -> float:
+    """等效时间衰减加分：bonus = MAX × 0.5^(等效天数/半衰期)。从未命中（None）视作刚发生。"""
+    if last_ts is None or last_ts <= 0:
+        age_days = 0.0
+    else:
+        age_days = max(0.0, (time.time() - last_ts) / DAY_SECONDS)
+    return RECENCY_BONUS_MAX * (0.5 ** (age_days / RECENCY_HALF_LIFE_DAYS))
+
+
+def next_accessed_ts(old_ts: float | None, now: float) -> float:
+    """「回血一半」：已有时流逝时间折半（等效时间戳向 now 推进一半），从未命中记 now。"""
+    if old_ts is None or old_ts <= 0 or old_ts >= now:
+        return now
+    return now - (now - old_ts) / 2.0
+
+
+def _apply_recency_bonus(merged: list[dict[str, Any]]) -> None:
+    """就地为 merged 各项加 recency_bonus（读 SQLite，失败静默不影响检索）。"""
+    try:
+        from memory_sync import load_last_accessed
+
+        last_map = load_last_accessed([item['id'] for item in merged])
+        for item in merged:
+            bonus = recency_bonus(last_map.get(item['id']))
+            item['recency_bonus'] = bonus
+            item['score'] = float(item.get('score', 0) or 0) + bonus
+    except Exception:
+        for item in merged:
+            item.setdefault('recency_bonus', 0.0)
+
+
+def _touch_recency(results: list[dict[str, Any]]) -> None:
+    """命中回血：仅对最终返回的条目折半写回 last_accessed_at（失败静默）。"""
+    try:
+        from memory_sync import load_last_accessed, touch_last_accessed
+
+        now = time.time()
+        last_map = load_last_accessed([item['id'] for item in results])
+        touch_last_accessed([
+            (item['id'], next_accessed_ts(last_map.get(item['id']), now))
+            for item in results
+        ])
+    except Exception:
+        pass
 
 
 def _pick_with_project_quota(
@@ -591,6 +677,9 @@ def merge_and_rank(
     project: str = '',
     max_results: int = DEFAULT_MAX_RESULTS,
     read_projects: list[str] | None = None,
+    *,
+    apply_recency: bool = False,
+    dropped: list | None = None,
 ) -> list[dict[str, Any]]:
     """加权 RRF 合并两路排名，保留 keyword_score / vector_score 分离展示。"""
     project = normalize_project(project)
@@ -634,14 +723,40 @@ def merge_and_rank(
     merged.sort(key=_rank_key)
 
     _apply_result_bonuses(merged, project)
+    if apply_recency:
+        _apply_recency_bonus(merged)
     if read_projects is not None:
         from workspace_config import filter_by_read_access
 
+        pre_ids = {item['id'] for item in merged}
         merged = filter_by_read_access(merged, read_projects)
-    if not project:
-        return _attach_rank(merged[:max_results])
+        if dropped is not None:
+            kept_ids = {item['id'] for item in merged}
+            for memory_id in pre_ids - kept_ids:
+                _record_drop(dropped, {'id': memory_id}, 'read_access', 'workspace 读权限过滤')
 
-    return _attach_rank(_pick_with_project_quota(merged, project, max_results))
+    def _finalize(picked: list[dict[str, Any]]) -> list[dict[str, Any]]:
+        if dropped is not None:
+            picked_ids = {item['id'] for item in picked}
+            for item in merged:
+                if item['id'] not in picked_ids:
+                    _record_drop(dropped, item, 'rank_out', '未进最终结果')
+        if apply_recency:
+            _touch_recency(picked)
+        return _attach_rank(picked)
+
+    if not project:
+        return _finalize(merged[:max_results])
+
+    picked = _pick_with_project_quota(merged, project, max_results)
+    if dropped is not None:
+        picked_ids = {item['id'] for item in picked}
+        for item in merged:
+            if item['id'] not in picked_ids:
+                _record_drop(dropped, item, 'project_quota', '配额裁剪未选中')
+    if apply_recency:
+        _touch_recency(picked)
+    return _attach_rank(picked)
 
 
 def hybrid_search(
@@ -651,21 +766,24 @@ def hybrid_search(
     max_results: int = DEFAULT_MAX_RESULTS,
     top_k: int = DEFAULT_TOP_K,
     read_projects: list[str] | None = None,
+    diagnostics_out: list | None = None,
 ) -> list[dict[str, Any]]:
-    """混合检索入口。"""
+    """混合检索入口。diagnostics_out 传入 list 时收集被抑制条目及原因（可观测性）。"""
     query = (query or '').strip()
     if not query:
         return []
 
+    dropped: list | None = diagnostics_out if diagnostics_out is not None else None
     recall_k = max(top_k, RRF_RECALL_TOP_K)
     filter_lang_en = query_has_cjk(query)
-    vector_results = vector_search(query, top_k=recall_k, filter_lang_en=filter_lang_en)
+    vector_results = vector_search(query, top_k=recall_k, filter_lang_en=filter_lang_en, dropped=dropped)
     vec_rank_map = {item['id']: rank for rank, item in enumerate(vector_results, start=1)}
     keyword_results = keyword_search(
         query,
         top_k=recall_k,
         filter_lang_en=filter_lang_en,
         vec_rank_map=vec_rank_map,
+        dropped=dropped,
     )
     return merge_and_rank(
         keyword_results,
@@ -673,6 +791,8 @@ def hybrid_search(
         project=project,
         max_results=max_results,
         read_projects=read_projects,
+        apply_recency=True,
+        dropped=dropped,
     )
 
 
@@ -745,6 +865,7 @@ def format_mcp_search_output(results: list[dict[str, Any]]) -> str:
         rrf_score = float(item.get('rrf_score', item.get('score', 0)) or 0)
         project_bonus = float(item.get('project_bonus', 0) or 0)
         preference_bonus = float(item.get('preference_bonus', 0) or 0)
+        recency_bonus_val = float(item.get('recency_bonus', 0) or 0)
         kw_rank = int(item.get('keyword_rank', 0) or 0)
         vec_rank = int(item.get('vector_rank', 0) or 0)
         rank_prefix = f'#{rank} ' if rank else ''
@@ -753,6 +874,8 @@ def format_mcp_search_output(results: list[dict[str, Any]]) -> str:
             bonus_parts.append(f'proj=+{project_bonus:.4f}')
         if preference_bonus > 0:
             bonus_parts.append(f'pref=+{preference_bonus:.4f}')
+        if recency_bonus_val > 0:
+            bonus_parts.append(f'rec=+{recency_bonus_val:.4f}')
         bonus_part = (' ' + ' '.join(bonus_parts)) if bonus_parts else ''
         lines.append(
             f'{rank_prefix}[{item.get("id", "")}] {scope_tag} ({source}) '
